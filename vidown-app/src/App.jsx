@@ -59,6 +59,7 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const chatEndRef = useRef(null);
 
   useEffect(() => {
@@ -98,7 +99,15 @@ export default function App() {
   };
 
   const triggerDownload = async () => {
-    if (!url || !detectedPlatform) return;
+    setErrorMessage('');
+    if (!url) {
+      setErrorMessage('Please paste a video URL first!');
+      return;
+    }
+    if (!detectedPlatform) {
+      setErrorMessage('Platform not detected. Please paste a valid URL from Shopee, TikTok, Instagram, Facebook, or Threads.');
+      return;
+    }
     setDownloadState('analyzing');
     setDownloadProgress(0);
     setStatusMessage('Analyzing URL...');
@@ -267,40 +276,18 @@ download_video('https://www.tiktok.com/@user/video/123')`;
           {/* Download Tab */}
           {activeTab === 'download' && (
             <div className="space-y-6 animate-fadeIn">
-              {/* Promo Banner */}
-              <div className="bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/30 rounded-2xl p-6">
-                <h2 className="text-xl font-bold mb-2">Download Videos from 5 Platforms</h2>
-                <p className="text-slate-300 text-sm">Paste any video URL from Shopee, TikTok, Instagram, Facebook, or Threads and download instantly.</p>
-              </div>
-
-              {/* Platform Cards */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                {Object.entries(platforms).map(([key, platform]) => (
-                  <div
-                    key={key}
-                    className={`p-4 rounded-2xl border border-slate-700 hover:border-slate-600 transition-all cursor-pointer ${
-                      detectedPlatform === key ? `border-2 ${platform.borderColor}` : ''
-                    }`}
-                  >
-                    <div className={`w-10 h-10 rounded-xl ${platform.iconBg} flex items-center justify-center mb-3`}>
-                      <FileVideo size={18} />
-                    </div>
-                    <p className="text-sm font-medium text-slate-200">{platform.name}</p>
-                  </div>
-                ))}
-              </div>
-
-              {/* URL Input */}
-              <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800">
-                <label className="text-sm font-medium text-slate-300 mb-3 block">Video URL</label>
-                <div className="flex gap-2">
+              {/* URL Input - Hero Section */}
+              <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 rounded-3xl p-8 border border-blue-500/20 shadow-lg shadow-blue-500/5">
+                <h2 className="text-2xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">Download Video Instantly</h2>
+                <p className="text-slate-400 text-sm mb-5">Paste any video URL from Shopee, TikTok, Instagram, Facebook, or Threads</p>
+                <div className="flex flex-col sm:flex-row gap-3">
                   <div className="flex-1 relative">
                     <input
                       type="text"
                       value={url}
-                      onChange={(e) => setUrl(e.target.value)}
+                      onChange={(e) => { setUrl(e.target.value); setErrorMessage(''); }}
                       placeholder={detectedPlatform ? platforms[detectedPlatform].placeholder : 'Paste video URL here...'}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-5 py-4 text-base text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                     />
                     {detectedPlatform && (
                       <span className={`absolute right-3 top-1/2 -translate-y-1/2 px-2 py-0.5 rounded-full text-xs font-medium bg-gradient-to-r ${platforms[detectedPlatform].color} text-white`}>
@@ -310,22 +297,33 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                   </div>
                   <button
                     onClick={handlePaste}
-                    className="px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700 transition-colors text-sm flex items-center gap-2"
+                    className="px-5 py-4 bg-slate-800 border border-slate-700 rounded-xl hover:bg-slate-700 transition-colors text-sm font-medium flex items-center justify-center gap-2"
                   >
-                    <Link2 size={16} /> Paste
+                    <Link2 size={18} /> Paste
                   </button>
                   <button
                     onClick={triggerDownload}
-                    disabled={!url || !detectedPlatform || downloadState === 'downloading' || downloadState === 'analyzing'}
-                    className="px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    disabled={downloadState === 'downloading' || downloadState === 'analyzing'}
+                    className={`px-8 py-4 rounded-xl font-semibold text-base transition-all flex items-center justify-center gap-2 ${
+                      downloadState === 'downloading' || downloadState === 'analyzing'
+                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                        : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-500 hover:to-purple-500 hover:shadow-lg hover:shadow-purple-500/25 active:scale-95'
+                    }`}
                   >
                     {downloadState === 'downloading' || downloadState === 'analyzing' ? (
-                      <><RefreshCw size={16} className="animate-spin" /> Processing</>
+                      <><RefreshCw size={18} className="animate-spin" /> Processing</>
                     ) : (
-                      <><Download size={16} /> Download</>
+                      <><Download size={18} /> Download</>
                     )}
                   </button>
                 </div>
+
+                {/* Error Message */}
+                {errorMessage && (
+                  <div className="mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2">
+                    {errorMessage}
+                  </div>
+                )}
 
                 {/* Progress Bar */}
                 {(downloadState === 'analyzing' || downloadState === 'downloading') && (
@@ -363,6 +361,29 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                     </button>
                   </div>
                 )}
+              </div>
+
+              {/* Promo Banner */}
+              <div className="bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/30 rounded-2xl p-6">
+                <h2 className="text-xl font-bold mb-2">Download Videos from 5 Platforms</h2>
+                <p className="text-slate-300 text-sm">Paste any video URL from Shopee, TikTok, Instagram, Facebook, or Threads and download instantly.</p>
+              </div>
+
+              {/* Platform Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {Object.entries(platforms).map(([key, platform]) => (
+                  <div
+                    key={key}
+                    className={`p-4 rounded-2xl border border-slate-700 hover:border-slate-600 transition-all cursor-pointer ${
+                      detectedPlatform === key ? `border-2 ${platform.borderColor}` : ''
+                    }`}
+                  >
+                    <div className={`w-10 h-10 rounded-xl ${platform.iconBg} flex items-center justify-center mb-3`}>
+                      <FileVideo size={18} />
+                    </div>
+                    <p className="text-sm font-medium text-slate-200">{platform.name}</p>
+                  </div>
+                ))}
               </div>
 
               {/* History */}
