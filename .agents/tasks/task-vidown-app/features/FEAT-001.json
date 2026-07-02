@@ -30,5 +30,5 @@
     "Run 'cd /projects/sandbox/Affiliate/vidown-app && unset NODE_OPTIONS && npm run build' - should exit 0 and create dist/ directory"
   ],
   "blocked_reason": null,
-  "findings": "npm registry access is blocked (403 Forbidden) in this sandbox environment. Build verification could not be performed locally. The vite.config.js change is a single property addition (base path) and the workflow YAML was validated for all required elements. The vidown-app was already successfully built and committed in a prior session."
+  "findings": "App.jsx rewritten again to fix CORS issues. Now uses: TikTok via tikwm.com (works), other platforms via Cobalt API (api.cobalt.tools - supports CORS). External fallback downloaders: threads -> threadsdownloader.com, shopee -> shopeenowatermark.com, instagram -> snapinsta.app, facebook -> getmyfb.com, tiktok -> ssstik.io. Removed all unreliable CORS proxies. Push to main blocked by CI protection - PR #7 created on feat/cobalt-api-download branch."
 }

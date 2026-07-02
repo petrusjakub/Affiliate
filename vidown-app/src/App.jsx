@@ -2,342 +2,69 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Download, Sparkles, BookOpen, Code, History, Link2, CheckCircle,
   RefreshCw, Send, FileVideo, Info, Smartphone, Copy, Check, Menu, X,
-  Play
+  Play, ExternalLink
 } from 'lucide-react';
 
-const apiKey = "";
-const modelName = "gemini-2.5-flash-preview-09-2025";
-
-// CORS proxy options for bypassing browser restrictions
-const CORS_PROXIES = [
-  'https://corsproxy.io/?',
-  'https://api.allorigins.win/raw?url=',
-];
-
-// Helper: try fetch with CORS proxy fallback
-async function fetchWithProxy(url, options = {}) {
-  // First try direct fetch
-  try {
-    const res = await fetch(url, options);
-    if (res.ok) return res;
-  } catch (e) {
-    // Direct fetch failed, try proxies
-  }
-  // Try CORS proxies for GET requests only
-  if (!options.method || options.method === 'GET') {
-    for (const proxy of CORS_PROXIES) {
-      try {
-        const res = await fetch(proxy + encodeURIComponent(url));
-        if (res.ok) return res;
-      } catch (e) {
-        continue;
-      }
-    }
-  }
-  throw new Error('All fetch attempts failed');
-}
-
-// Download API implementations for each platform
-const downloadAPIs = {
-  tiktok: async (videoUrl) => {
-    // Primary: tikwm.com API
-    const response = await fetch('https://www.tikwm.com/api/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ url: videoUrl, hd: '1' }),
-    });
-    if (!response.ok) throw new Error('TikWM API request failed');
-    const data = await response.json();
-    if (data.code !== 0 || !data.data) {
-      throw new Error(data.msg || 'Failed to extract TikTok video');
-    }
-    const videoData = data.data;
-    return {
-      videoUrl: videoData.hdplay || videoData.play,
-      title: videoData.title || 'TikTok Video',
-      thumbnail: videoData.cover || videoData.origin_cover,
-      duration: videoData.duration ? `${Math.floor(videoData.duration / 60)}:${String(videoData.duration % 60).padStart(2, '0')}` : 'N/A',
-      quality: videoData.hdplay ? '1080p HD' : '720p',
-      author: videoData.author?.nickname || 'Unknown',
-    };
-  },
-
-  instagram: async (videoUrl) => {
-    // Try multiple Instagram download APIs
-    const apis = [
-      {
-        name: 'saveig',
-        fetch: async () => {
-          const res = await fetch('https://v3.saveig.app/api/ajaxSearch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ q: videoUrl, t: 'media', lang: 'en' }),
-          });
-          if (!res.ok) throw new Error('SaveIG API failed');
-          const data = await res.json();
-          if (!data.data) throw new Error('No data from SaveIG');
-          // Parse HTML response to extract download link
-          const urlMatch = data.data.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/i) 
-            || data.data.match(/href="(https?:\/\/[^"]+)"/i);
-          if (!urlMatch) throw new Error('Could not extract video URL from SaveIG');
-          return {
-            videoUrl: urlMatch[1].replace(/&amp;/g, '&'),
-            title: 'Instagram Reel',
-            thumbnail: null,
-            duration: 'N/A',
-            quality: '720p',
-            author: 'Instagram User',
-          };
-        }
-      },
-      {
-        name: 'snapinsta',
-        fetch: async () => {
-          const res = await fetch('https://snapinsta.app/action2.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ url: videoUrl }),
-          });
-          if (!res.ok) throw new Error('SnapInsta API failed');
-          const html = await res.text();
-          const urlMatch = html.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/i)
-            || html.match(/"downloadUrl"\s*:\s*"(https?:\/\/[^"]+)"/i);
-          if (!urlMatch) throw new Error('Could not extract from SnapInsta');
-          return {
-            videoUrl: urlMatch[1].replace(/\\u0026/g, '&').replace(/&amp;/g, '&'),
-            title: 'Instagram Reel',
-            thumbnail: null,
-            duration: 'N/A',
-            quality: '720p',
-            author: 'Instagram User',
-          };
-        }
-      }
-    ];
-
-    let lastError = null;
-    for (const api of apis) {
-      try {
-        return await api.fetch();
-      } catch (e) {
-        lastError = e;
-        continue;
-      }
-    }
-    throw new Error(`Instagram download failed: ${lastError?.message || 'All APIs unavailable'}`);
-  },
-
-  facebook: async (videoUrl) => {
-    // Try Facebook video download APIs
-    const apis = [
-      {
-        name: 'getmyfb',
-        fetch: async () => {
-          const res = await fetch('https://getmyfb.com/process', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ id: videoUrl, locale: 'en' }),
-          });
-          if (!res.ok) throw new Error('GetMyFB API failed');
-          const html = await res.text();
-          const hdMatch = html.match(/href="(https?:\/\/[^"]+)" [^>]*>.*?HD/i);
-          const sdMatch = html.match(/href="(https?:\/\/[^"]+)" [^>]*>.*?SD/i);
-          const anyMatch = html.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/i);
-          const downloadUrl = hdMatch?.[1] || sdMatch?.[1] || anyMatch?.[1];
-          if (!downloadUrl) throw new Error('Could not extract Facebook video URL');
-          return {
-            videoUrl: downloadUrl.replace(/&amp;/g, '&'),
-            title: 'Facebook Video',
-            thumbnail: null,
-            duration: 'N/A',
-            quality: hdMatch ? '720p HD' : '360p SD',
-            author: 'Facebook User',
-          };
-        }
-      },
-      {
-        name: 'fbdown',
-        fetch: async () => {
-          const res = await fetch('https://fbdown.net/download.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ URLz: videoUrl }),
-          });
-          if (!res.ok) throw new Error('FBDown API failed');
-          const html = await res.text();
-          const urlMatch = html.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/i)
-            || html.match(/id="hdlink"[^>]*href="(https?:\/\/[^"]+)"/i)
-            || html.match(/id="sdlink"[^>]*href="(https?:\/\/[^"]+)"/i);
-          if (!urlMatch) throw new Error('Could not extract from FBDown');
-          return {
-            videoUrl: urlMatch[1].replace(/&amp;/g, '&'),
-            title: 'Facebook Video',
-            thumbnail: null,
-            duration: 'N/A',
-            quality: '720p',
-            author: 'Facebook User',
-          };
-        }
-      }
-    ];
-
-    let lastError = null;
-    for (const api of apis) {
-      try {
-        return await api.fetch();
-      } catch (e) {
-        lastError = e;
-        continue;
-      }
-    }
-    throw new Error(`Facebook download failed: ${lastError?.message || 'All APIs unavailable'}`);
-  },
-
-  threads: async (videoUrl) => {
-    // Threads uses similar approach to Instagram
-    const apis = [
-      {
-        name: 'saveig-threads',
-        fetch: async () => {
-          const res = await fetch('https://v3.saveig.app/api/ajaxSearch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ q: videoUrl, t: 'media', lang: 'en' }),
-          });
-          if (!res.ok) throw new Error('SaveIG Threads API failed');
-          const data = await res.json();
-          if (!data.data) throw new Error('No data from SaveIG for Threads');
-          const urlMatch = data.data.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/i)
-            || data.data.match(/href="(https?:\/\/[^"]+)"/i);
-          if (!urlMatch) throw new Error('Could not extract Threads video URL');
-          return {
-            videoUrl: urlMatch[1].replace(/&amp;/g, '&'),
-            title: 'Threads Video',
-            thumbnail: null,
-            duration: 'N/A',
-            quality: '720p',
-            author: 'Threads User',
-          };
-        }
-      }
-    ];
-
-    let lastError = null;
-    for (const api of apis) {
-      try {
-        return await api.fetch();
-      } catch (e) {
-        lastError = e;
-        continue;
-      }
-    }
-    throw new Error(`Threads download failed: ${lastError?.message || 'All APIs unavailable'}`);
-  },
-
-  shopee: async (videoUrl) => {
-    // Shopee video extraction - try to parse video ID from URL and use Shopee CDN
-    const apis = [
-      {
-        name: 'tikwm-universal',
-        fetch: async () => {
-          // Some universal downloaders can handle Shopee links
-          const res = await fetch('https://www.tikwm.com/api/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ url: videoUrl, hd: '1' }),
-          });
-          if (!res.ok) throw new Error('TikWM universal API failed for Shopee');
-          const data = await res.json();
-          if (data.code !== 0 || !data.data) {
-            throw new Error('TikWM could not process Shopee URL');
-          }
-          return {
-            videoUrl: data.data.hdplay || data.data.play,
-            title: data.data.title || 'Shopee Video',
-            thumbnail: data.data.cover,
-            duration: 'N/A',
-            quality: '720p',
-            author: 'Shopee Seller',
-          };
-        }
-      },
-      {
-        name: 'direct-extract',
-        fetch: async () => {
-          // Try to fetch the page and extract video URL from metadata
-          const proxyUrl = CORS_PROXIES[0] + encodeURIComponent(videoUrl);
-          const res = await fetch(proxyUrl);
-          if (!res.ok) throw new Error('Cannot fetch Shopee page');
-          const html = await res.text();
-          // Look for video URL patterns in Shopee page
-          const videoMatch = html.match(/"videoUrl"\s*:\s*"(https?:\/\/[^"]+)"/i)
-            || html.match(/property="og:video"\s+content="(https?:\/\/[^"]+)"/i)
-            || html.match(/property="og:video:url"\s+content="(https?:\/\/[^"]+)"/i)
-            || html.match(/"playUrl"\s*:\s*"(https?:\/\/[^"]+)"/i)
-            || html.match(/video[_-]?url['"]\s*:\s*['"](https?:\/\/[^'"]+)/i);
-          if (!videoMatch) throw new Error('Could not find video in Shopee page');
-          return {
-            videoUrl: videoMatch[1].replace(/\\u002F/g, '/').replace(/\\\//g, '/'),
-            title: 'Shopee Video',
-            thumbnail: null,
-            duration: 'N/A',
-            quality: '720p',
-            author: 'Shopee Seller',
-          };
-        }
-      }
-    ];
-
-    let lastError = null;
-    for (const api of apis) {
-      try {
-        return await api.fetch();
-      } catch (e) {
-        lastError = e;
-        continue;
-      }
-    }
-    throw new Error(`Shopee download failed: ${lastError?.message || 'All APIs unavailable'}. Try copying the direct video URL from the Shopee app.`);
-  },
+const apiKey = '';
+const modelName = 'gemini-2.5-flash-preview-09-2025';
+// External downloader services (fallback when API fails)
+const EXTERNAL_DOWNLOADERS = {
+  tiktok: 'https://ssstik.io/en',
+  instagram: 'https://snapinsta.app',
+  facebook: 'https://getmyfb.com',
+  threads: 'https://threadsdownloader.com',
+  shopee: 'https://shopeenowatermark.com',
 };
 
-// Universal fallback using cobalt API
-async function cobaltFallback(videoUrl) {
+// Cobalt API - universal video downloader that supports CORS
+async function cobaltDownload(videoUrl) {
   const res = await fetch('https://api.cobalt.tools/api/json', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
     },
-    body: JSON.stringify({ url: videoUrl, vQuality: '720' }),
+    body: JSON.stringify({ url: videoUrl }),
   });
-  if (!res.ok) throw new Error('Cobalt API request failed');
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => 'Unknown error');
+    throw new Error('Cobalt API gagal: ' + res.status + ' - ' + errorText);
+  }
   const data = await res.json();
   if (data.status === 'error') {
-    throw new Error(data.text || 'Cobalt could not process this URL');
+    throw new Error(data.text || 'Cobalt tidak bisa memproses URL ini');
   }
   if (data.status === 'redirect' || data.status === 'stream') {
-    return {
-      videoUrl: data.url,
-      title: 'Downloaded Video',
-      thumbnail: null,
-      duration: 'N/A',
-      quality: '720p',
-      author: 'Unknown',
-    };
+    return { videoUrl: data.url };
   }
-  if (data.status === 'picker' && data.picker?.length > 0) {
+  if (data.status === 'picker' && data.picker && data.picker.length > 0) {
     const videoItem = data.picker.find(p => p.type === 'video') || data.picker[0];
-    return {
-      videoUrl: videoItem.url,
-      title: 'Downloaded Video',
-      thumbnail: videoItem.thumb || null,
-      duration: 'N/A',
-      quality: '720p',
-      author: 'Unknown',
-    };
+    return { videoUrl: videoItem.url, thumbnail: videoItem.thumb || null };
   }
-  throw new Error('Cobalt returned unexpected response');
+  throw new Error('Cobalt mengembalikan response yang tidak dikenali');
+}
+
+// TikTok specific API (tikwm.com) - known to work
+async function tiktokDownload(videoUrl) {
+  const response = await fetch('https://www.tikwm.com/api/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ url: videoUrl, hd: '1' }),
+  });
+  if (!response.ok) throw new Error('TikWM API request gagal');
+  const data = await response.json();
+  if (data.code !== 0 || !data.data) {
+    throw new Error(data.msg || 'Gagal mengekstrak video TikTok');
+  }
+  const videoData = data.data;
+  return {
+    videoUrl: videoData.hdplay || videoData.play,
+    title: videoData.title || 'TikTok Video',
+    thumbnail: videoData.cover || videoData.origin_cover,
+    duration: videoData.duration ? Math.floor(videoData.duration / 60) + ':' + String(videoData.duration % 60).padStart(2, '0') : null,
+    quality: videoData.hdplay ? '1080p HD' : '720p',
+    author: videoData.author ? videoData.author.nickname : 'Unknown',
+  };
 }
 
 const platforms = {
@@ -394,6 +121,7 @@ export default function App() {
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
+  const [showExternalFallback, setShowExternalFallback] = useState(false);
   const chatEndRef = useRef(null);
 
   useEffect(() => {
@@ -435,75 +163,74 @@ export default function App() {
   const triggerDownload = async () => {
     setErrorMessage('');
     setVideoPreviewUrl(null);
+    setShowExternalFallback(false);
+    setDownloadResult(null);
+
     if (!url) {
-      setErrorMessage('Please paste a video URL first!');
+      setErrorMessage('Silakan paste URL video terlebih dahulu!');
       return;
     }
     if (!detectedPlatform) {
-      setErrorMessage('Platform not detected. Please paste a valid URL from Shopee, TikTok, Instagram, Facebook, or Threads.');
+      setErrorMessage('Platform tidak terdeteksi. Paste URL yang valid dari Shopee, TikTok, Instagram, Facebook, atau Threads.');
       return;
     }
 
     setDownloadState('analyzing');
     setDownloadProgress(10);
-    setStatusMessage('Analyzing URL and detecting platform...');
+    setStatusMessage('Menganalisis URL...');
 
     try {
-      // Step 1: Connecting to platform API
-      setDownloadProgress(25);
-      setStatusMessage(`Connecting to ${platforms[detectedPlatform].name} API...`);
-      setDownloadState('downloading');
-
       let result = null;
 
-      // Step 2: Try platform-specific API first
-      setDownloadProgress(40);
-      setStatusMessage(`Extracting video from ${platforms[detectedPlatform].name}...`);
-
-      try {
-        const platformAPI = downloadAPIs[detectedPlatform];
-        if (platformAPI) {
-          result = await platformAPI(url);
-        }
-      } catch (platformError) {
-        // Platform-specific API failed, try cobalt as fallback
-        setDownloadProgress(60);
-        setStatusMessage('Primary API failed, trying alternative server...');
-
+      // For TikTok: use tikwm.com API (proven to work)
+      if (detectedPlatform === 'tiktok') {
+        setDownloadProgress(30);
+        setStatusMessage('Menghubungi TikTok API...');
         try {
-          result = await cobaltFallback(url);
-        } catch (cobaltError) {
-          throw new Error(
-            `Could not download from ${platforms[detectedPlatform].name}. ` +
-            `Primary: ${platformError.message}. ` +
-            `Fallback: ${cobaltError.message}`
-          );
+          result = await tiktokDownload(url);
+        } catch (tiktokErr) {
+          // TikTok API failed, try Cobalt
+          setDownloadProgress(50);
+          setStatusMessage('API utama gagal, mencoba Cobalt...');
+          try {
+            result = await cobaltDownload(url);
+          } catch (cobaltErr) {
+            throw new Error('Semua API gagal. ' + tiktokErr.message);
+          }
+        }
+      } else {
+        // For other platforms: try Cobalt API first
+        setDownloadProgress(30);
+        setStatusMessage('Menghubungi Cobalt API...');
+        try {
+          result = await cobaltDownload(url);
+        } catch (cobaltErr) {
+          // Cobalt failed - show external fallback
+          throw new Error('Cobalt API gagal: ' + cobaltErr.message);
         }
       }
 
       if (!result || !result.videoUrl) {
-        throw new Error('Could not extract video URL. The video may be private or the link is invalid.');
+        throw new Error('Tidak bisa mengekstrak URL video. Video mungkin private atau link tidak valid.');
       }
 
-      // Step 3: Video extracted successfully
+      // Success - show video player
       setDownloadProgress(90);
-      setStatusMessage('Video extracted successfully!');
-
-      // Set video preview URL
+      setStatusMessage('Video berhasil diekstrak!');
       setVideoPreviewUrl(result.videoUrl);
 
       await new Promise(resolve => setTimeout(resolve, 300));
       setDownloadProgress(100);
-      setStatusMessage('Ready to save!');
+      setStatusMessage('Siap disimpan!');
 
       const downloadResultData = {
         id: Date.now().toString(),
         platform: detectedPlatform,
         url: url,
-        title: result.title || `Video from ${platforms[detectedPlatform].name}`,
-        thumbnail: result.thumbnail,
+        title: result.title || 'Video dari ' + platforms[detectedPlatform].name,
+        thumbnail: result.thumbnail || null,
         videoUrl: result.videoUrl,
-        duration: result.duration || 'N/A',
+        duration: result.duration || null,
         quality: result.quality || '720p',
         author: result.author || 'Unknown',
         timestamp: new Date().toLocaleString()
@@ -514,10 +241,20 @@ export default function App() {
       setHistory(prev => [downloadResultData, ...prev]);
 
     } catch (error) {
+      // Download failed - show external fallback option
       setDownloadState('idle');
       setDownloadProgress(0);
       setStatusMessage('');
-      setErrorMessage(error.message || 'An unexpected error occurred. Please try again.');
+      setErrorMessage(error.message || 'Terjadi kesalahan. Silakan coba lagi.');
+      setShowExternalFallback(true);
+    }
+  };
+
+  const handleOpenExternalDownloader = () => {
+    if (!detectedPlatform) return;
+    const externalUrl = EXTERNAL_DOWNLOADERS[detectedPlatform];
+    if (externalUrl) {
+      window.open(externalUrl, '_blank');
     }
   };
 
@@ -526,42 +263,38 @@ export default function App() {
 
     try {
       // Try to fetch the video as a blob for proper download
-      const proxyUrl = CORS_PROXIES[0] + encodeURIComponent(downloadResult.videoUrl);
-      let response;
-
-      try {
-        // First try direct fetch
-        response = await fetch(downloadResult.videoUrl, { mode: 'cors' });
-        if (!response.ok) throw new Error('Direct fetch failed');
-      } catch {
-        // Try with CORS proxy
-        try {
-          response = await fetch(proxyUrl);
-          if (!response.ok) throw new Error('Proxy fetch failed');
-        } catch {
-          // If blob download fails, open in new tab as fallback
-          window.open(downloadResult.videoUrl, '_blank');
-          return;
-        }
-      }
+      const response = await fetch(downloadResult.videoUrl, { mode: 'cors' });
+      if (!response.ok) throw new Error('Fetch gagal');
 
       const blob = await response.blob();
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = blobUrl;
-      a.download = `vidown_${downloadResult.platform}_${downloadResult.id}.mp4`;
+      a.download = 'vidown_' + downloadResult.platform + '_' + downloadResult.id + '.mp4';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(blobUrl);
     } catch {
-      // Ultimate fallback: open direct URL
-      window.open(downloadResult.videoUrl, '_blank');
+      // Fallback: use download attribute with direct link
+      try {
+        const a = document.createElement('a');
+        a.href = downloadResult.videoUrl;
+        a.download = 'vidown_' + downloadResult.platform + '_' + downloadResult.id + '.mp4';
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } catch {
+        // Ultimate fallback: open in new tab
+        window.open(downloadResult.videoUrl, '_blank');
+      }
     }
   };
 
   const handleOpenVideo = () => {
-    if (downloadResult?.videoUrl) {
+    if (downloadResult && downloadResult.videoUrl) {
       window.open(downloadResult.videoUrl, '_blank');
     }
   };
@@ -573,6 +306,7 @@ export default function App() {
     setDownloadResult(null);
     setVideoPreviewUrl(null);
     setErrorMessage('');
+    setShowExternalFallback(false);
   };
 
   const handleSendMessage = async () => {
@@ -584,7 +318,7 @@ export default function App() {
 
     try {
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+        'https://generativelanguage.googleapis.com/v1beta/models/' + modelName + ':generateContent?key=' + apiKey,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -596,10 +330,10 @@ export default function App() {
 
       if (!response.ok) throw new Error('API request failed');
       const data = await response.json();
-      const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I could not generate a response.';
+      const aiText = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] ? data.candidates[0].content.parts[0].text : 'Maaf, tidak bisa membuat respons.';
       setMessages(prev => [...prev, { role: 'assistant', content: aiText }]);
     } catch (error) {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, an error occurred. Please check your API key and try again.' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Maaf, terjadi error. Periksa API key dan coba lagi.' }]);
     } finally {
       setIsChatLoading(false);
     }
@@ -672,7 +406,7 @@ download_video('https://www.tiktok.com/@user/video/123')`;
         </nav>
         <div className="p-4 border-t border-slate-800">
           <div className="text-xs text-slate-500 space-y-1">
-            <p className="flex items-center gap-1"><Info size={12} /> Engine: yt-dlp</p>
+            <p className="flex items-center gap-1"><Info size={12} /> Engine: Cobalt + TikWM</p>
             <p>AI: Gemini 2.5 Flash</p>
           </div>
         </div>
@@ -699,14 +433,14 @@ download_video('https://www.tiktok.com/@user/video/123')`;
               {/* URL Input - Hero Section */}
               <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 rounded-3xl p-8 border border-blue-500/20 shadow-lg shadow-blue-500/5">
                 <h2 className="text-2xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">Download Video Instantly</h2>
-                <p className="text-slate-400 text-sm mb-5">Paste any video URL from Shopee, TikTok, Instagram, Facebook, or Threads</p>
+                <p className="text-slate-400 text-sm mb-5">Paste URL video dari Shopee, TikTok, Instagram, Facebook, atau Threads</p>
                 <div className="flex flex-col sm:flex-row gap-3">
                   <div className="flex-1 relative">
                     <input
                       type="text"
                       value={url}
-                      onChange={(e) => { setUrl(e.target.value); setErrorMessage(''); }}
-                      placeholder={detectedPlatform ? platforms[detectedPlatform].placeholder : 'Paste video URL here...'}
+                      onChange={(e) => { setUrl(e.target.value); setErrorMessage(''); setShowExternalFallback(false); }}
+                      placeholder={detectedPlatform ? platforms[detectedPlatform].placeholder : 'Paste URL video di sini...'}
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl px-5 py-4 text-base text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                     />
                     {detectedPlatform && (
@@ -726,7 +460,7 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                     disabled={downloadState === 'downloading' || downloadState === 'analyzing'}
                     className={`px-8 py-4 rounded-xl font-semibold text-base transition-all flex items-center justify-center gap-2 ${
                       downloadState === 'downloading' || downloadState === 'analyzing'
-                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                        ? 'bg-gradient-to-r from-blue-600/50 to-purple-600/50 text-white/70 cursor-wait'
                         : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-500 hover:to-purple-500 hover:shadow-lg hover:shadow-purple-500/25 active:scale-95'
                     }`}
                   >
@@ -740,8 +474,25 @@ download_video('https://www.tiktok.com/@user/video/123')`;
 
                 {/* Error Message */}
                 {errorMessage && (
-                  <div className="mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-2">
-                    {errorMessage}
+                  <div className="mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
+                    <p className="mb-2">{errorMessage}</p>
+                    {showExternalFallback && detectedPlatform && (
+                      <div className="mt-3 pt-3 border-t border-red-500/20">
+                        <p className="text-slate-300 text-sm mb-2">
+                          Gunakan downloader eksternal yang sudah terbukti bekerja:
+                        </p>
+                        <button
+                          onClick={handleOpenExternalDownloader}
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-sm font-medium hover:from-blue-500 hover:to-purple-500 transition-all"
+                        >
+                          <ExternalLink size={16} />
+                          Buka di {EXTERNAL_DOWNLOADERS[detectedPlatform] ? new URL(EXTERNAL_DOWNLOADERS[detectedPlatform]).hostname : 'Downloader Eksternal'}
+                        </button>
+                        <p className="text-xs text-slate-500 mt-2">
+                          Tip: Paste URL video kamu di situs tersebut untuk mendownload.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -755,29 +506,29 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                     <div className="w-full bg-slate-800 rounded-full h-2">
                       <div
                         className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-500"
-                        style={{ width: `${downloadProgress}%` }}
+                        style={{ width: downloadProgress + '%' }}
                       />
                     </div>
                   </div>
                 )}
 
-                {/* Download Result */}
+                {/* Download Result with Video Player */}
                 {downloadState === 'completed' && downloadResult && (
                   <div className="mt-4 bg-slate-800 rounded-2xl p-5 border border-green-500/30 animate-scaleIn">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
                         <CheckCircle size={20} className="text-green-400" />
-                        <span className="text-sm font-medium text-green-400">Video Ready</span>
+                        <span className="text-sm font-medium text-green-400">Video Siap!</span>
                       </div>
                       <button
                         onClick={resetDownload}
                         className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-700 transition-colors"
                       >
-                        New Download
+                        Download Baru
                       </button>
                     </div>
 
-                    {/* Video Preview */}
+                    {/* Video Preview Player */}
                     {videoPreviewUrl && (
                       <div className="mb-4 rounded-xl overflow-hidden bg-black">
                         <video
@@ -787,12 +538,12 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                           poster={downloadResult.thumbnail || undefined}
                           preload="metadata"
                         >
-                          Your browser does not support video playback.
+                          Browser tidak mendukung pemutaran video.
                         </video>
                       </div>
                     )}
 
-                    {/* Thumbnail fallback if video cannot be previewed */}
+                    {/* Thumbnail fallback */}
                     {!videoPreviewUrl && downloadResult.thumbnail && (
                       <div className="mb-4 rounded-xl overflow-hidden">
                         <img
@@ -804,29 +555,29 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                     )}
 
                     <div className="space-y-2 text-sm text-slate-300">
-                      <p><span className="text-slate-500">Title:</span> {downloadResult.title}</p>
-                      <p><span className="text-slate-500">Author:</span> {downloadResult.author}</p>
-                      <p><span className="text-slate-500">Quality:</span> {downloadResult.quality}</p>
-                      <p><span className="text-slate-500">Duration:</span> {downloadResult.duration}</p>
+                      <p><span className="text-slate-500">Judul:</span> {downloadResult.title}</p>
+                      {downloadResult.author && <p><span className="text-slate-500">Author:</span> {downloadResult.author}</p>}
+                      {downloadResult.quality && <p><span className="text-slate-500">Kualitas:</span> {downloadResult.quality}</p>}
+                      {downloadResult.duration && <p><span className="text-slate-500">Durasi:</span> {downloadResult.duration}</p>}
                     </div>
 
                     <div className="mt-4 flex gap-2">
                       <button
                         onClick={handleSaveFile}
-                        className="flex-1 py-3 bg-green-600 hover:bg-green-700 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                        className="flex-1 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2"
                       >
-                        <Download size={16} /> Save Video (MP4)
+                        <Download size={16} /> Simpan Video (MP4)
                       </button>
                       <button
                         onClick={handleOpenVideo}
                         className="px-4 py-3 bg-slate-700 hover:bg-slate-600 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
                       >
-                        <Play size={16} /> Open
+                        <Play size={16} /> Buka
                       </button>
                     </div>
 
                     <p className="mt-3 text-xs text-slate-500 text-center">
-                      If Save does not work, click Open to view the video in a new tab, then right-click and select "Save video as..."
+                      Jika Simpan tidak bekerja, klik Buka lalu klik kanan video dan pilih "Save video as..."
                     </p>
                   </div>
                 )}
@@ -834,8 +585,8 @@ download_video('https://www.tiktok.com/@user/video/123')`;
 
               {/* Promo Banner */}
               <div className="bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/30 rounded-2xl p-6">
-                <h2 className="text-xl font-bold mb-2">Download Videos from 5 Platforms</h2>
-                <p className="text-slate-300 text-sm">Paste any video URL from Shopee, TikTok, Instagram, Facebook, or Threads and download instantly.</p>
+                <h2 className="text-xl font-bold mb-2">Download Video dari 5 Platform</h2>
+                <p className="text-slate-300 text-sm">Paste URL video dari Shopee, TikTok, Instagram, Facebook, atau Threads. TikTok menggunakan API langsung, platform lain menggunakan Cobalt API dengan fallback ke downloader eksternal.</p>
               </div>
 
               {/* Platform Cards */}
@@ -844,7 +595,7 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                   <div
                     key={key}
                     className={`p-4 rounded-2xl border border-slate-700 hover:border-slate-600 transition-all cursor-pointer ${
-                      detectedPlatform === key ? `border-2 ${platform.borderColor}` : ''
+                      detectedPlatform === key ? 'border-2 ' + platform.borderColor : ''
                     }`}
                   >
                     <div className={`w-10 h-10 rounded-xl ${platform.iconBg} flex items-center justify-center mb-3`}>
@@ -859,13 +610,13 @@ download_video('https://www.tiktok.com/@user/video/123')`;
               {history.length > 0 && (
                 <div className="bg-slate-900 rounded-3xl p-6 border border-slate-800">
                   <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <History size={18} /> Download History
+                    <History size={18} /> Riwayat Download
                   </h3>
                   <div className="space-y-3">
                     {history.map((item) => (
                       <div key={item.id} className="flex items-center justify-between p-3 bg-slate-800 rounded-xl">
                         <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-lg ${platforms[item.platform]?.iconBg} flex items-center justify-center`}>
+                          <div className={`w-8 h-8 rounded-lg ${platforms[item.platform] ? platforms[item.platform].iconBg : ''} flex items-center justify-center`}>
                             <FileVideo size={14} />
                           </div>
                           <div>
@@ -900,9 +651,9 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                   {messages.length === 0 && (
                     <div className="text-center text-slate-500 py-12">
                       <Sparkles size={40} className="mx-auto mb-4 text-purple-400/50" />
-                      <p className="text-sm">Ask me anything about video downloading!</p>
+                      <p className="text-sm">Tanya apa saja tentang download video!</p>
                       <div className="flex flex-wrap justify-center gap-2 mt-4">
-                        {['How to download TikTok videos?', 'Best video quality settings', 'Supported platforms'].map(tag => (
+                        {['Cara download video TikTok?', 'Setting kualitas terbaik', 'Platform yang didukung'].map(tag => (
                           <button
                             key={tag}
                             onClick={() => setChatInput(tag)}
@@ -928,7 +679,7 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                   {isChatLoading && (
                     <div className="flex justify-start">
                       <div className="bg-slate-800 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-slate-400">
-                        <RefreshCw size={14} className="animate-spin inline mr-2" /> Thinking...
+                        <RefreshCw size={14} className="animate-spin inline mr-2" /> Berpikir...
                       </div>
                     </div>
                   )}
@@ -942,7 +693,7 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                      placeholder="Type your message..."
+                      placeholder="Ketik pesan..."
                       className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500"
                     />
                     <button
@@ -961,7 +712,7 @@ download_video('https://www.tiktok.com/@user/video/123')`;
           {/* Guides Tab */}
           {activeTab === 'guides' && (
             <div className="space-y-4 animate-fadeIn">
-              <h2 className="text-xl font-bold mb-4">Platform Guides</h2>
+              <h2 className="text-xl font-bold mb-4">Panduan Platform</h2>
               <div className="grid gap-4">
                 {[
                   {
