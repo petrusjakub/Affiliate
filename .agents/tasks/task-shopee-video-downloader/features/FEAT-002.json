@@ -2,7 +2,7 @@
   "id": "FEAT-002",
   "type": "fix",
   "description": "Security hardening: Fix SSRF in download proxy (domain allowlist), add Content-Length cap, re-enable TLS verification on download proxy path (document trade-off for Shopee API calls), and add server handler tests.",
-  "status": "in_progress",
+  "status": "completed",
   "steps": [
     "Add domain allowlist to /api/download proxy in server.py to prevent SSRF - only allow known Shopee CDN domains",
     "Add configurable max response size (Content-Length cap) for the download proxy",
@@ -21,5 +21,5 @@
     "Run: cd /projects/sandbox/Affiliate && python3 -c \"import py_compile; py_compile.compile('shopee-video-downloader/server.py', doraise=True); py_compile.compile('shopee-video-downloader/extractor.py', doraise=True)\""
   ],
   "blocked_reason": null,
-  "findings": null
+  "findings": "All 64 tests pass (18 new server handler tests added). Domain allowlist uses both static list and regex patterns for Shopee CDN subdomains. The allowlist patterns are anchored to specific Shopee TLDs to avoid subdomain spoofing (e.g., attacker.shopee.co.id.evil.com is correctly rejected). SSL verification is now enabled on the download proxy path while Shopee API calls retain disabled verification with clear documentation of the trade-off."
 }
