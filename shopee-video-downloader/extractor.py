@@ -128,7 +128,11 @@ def resolve_short_url(url: str, timeout: int = 10) -> str:
         NetworkError: Jika terjadi error jaringan
     """
     try:
-        # Buat SSL context yang tidak strict untuk kompatibilitas
+        # NOTE: SSL verification is intentionally disabled for Shopee short URL resolution.
+        # Some Shopee regional endpoints use certificates that may not be trusted by the
+        # default CA bundle in all environments. This is a known trade-off for a development
+        # tool that reverse-engineers undocumented APIs. The download proxy path (server.py)
+        # uses full certificate verification to protect end users from MITM attacks.
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
@@ -188,6 +192,11 @@ def fetch_video_info(video_id: str, timeout: int = 10) -> Dict[str, Any]:
     api_url = f"{SHOPEE_VIDEO_API}?video_id={video_id}"
     
     try:
+        # NOTE: SSL verification is intentionally disabled for Shopee API calls.
+        # Shopee's internal API endpoints may use certificates not present in the
+        # default CA bundle, or may rotate certificates frequently. This is an accepted
+        # trade-off for this reverse-engineering use case. The download proxy path in
+        # server.py uses full certificate verification to protect users from MITM.
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE

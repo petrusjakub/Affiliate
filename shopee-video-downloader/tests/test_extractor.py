@@ -6,6 +6,7 @@ Menggunakan unittest dan unittest.mock untuk testing tanpa akses jaringan.
 
 import unittest
 import json
+import ssl
 import sys
 import os
 from unittest.mock import patch, MagicMock, Mock
@@ -470,6 +471,237 @@ class TestServerIntegration(unittest.TestCase):
         import server
         index_path = os.path.join(server.STATIC_DIR, 'index.html')
         self.assertTrue(os.path.isfile(index_path))
+
+
+class TestIsAllowedDownloadDomain(unittest.TestCase):
+    """Test domain allowlist for the download proxy (SSRF protection)."""
+    
+    def test_allowed_static_domain(self):
+        """Known Shopee CDN domains should be allowed."""
+        import server
+        self.assertTrue(server.is_allowed_download_domain('cf.shopee.co.id'))
+        self.assertTrue(server.is_allowed_download_domain('cv.shopee.co.id'))
+        self.assertTrue(server.is_allowed_download_domain('cf.shopee.sg'))
+    
+    def test_allowed_dynamic_pattern(self):
+        """Dynamic CDN subdomains matching patterns should be allowed."""
+        import server
+        self.assertTrue(server.is_allowed_download_domain('down-id.susercontent.com'))
+        self.assertTrue(server.is_allowed_download_domain('media-sg.susercontent.com'))
+        self.assertTrue(server.is_allowed_download_domain('cdn-01.shopee.co.id'))
+    
+    def test_disallowed_internal_ip(self):
+        """Internal network IPs should not be allowed."""
+        import server
+        self.assertFalse(server.is_allowed_download_domain('169.254.169.254'))
+        self.assertFalse(server.is_allowed_download_domain('127.0.0.1'))
+        self.assertFalse(server.is_allowed_download_domain('10.0.0.1'))
+    
+    def test_disallowed_external_domain(self):
+        """External non-Shopee domains should not be allowed."""
+        import server
+        self.assertFalse(server.is_allowed_download_domain('evil.com'))
+        self.assertFalse(server.is_allowed_download_domain('google.com'))
+        self.assertFalse(server.is_allowed_download_domain('attacker.shopee.co.id.evil.com'))
+    
+    def test_case_insensitive(self):
+        """Domain check should be case-insensitive."""
+        import server
+        self.assertTrue(server.is_allowed_download_domain('CF.SHOPEE.CO.ID'))
+        self.assertTrue(server.is_allowed_download_domain('Down-ID.Susercontent.Com'))
+    
+    def test_disallowed_empty(self):
+        """Empty hostname should not be allowed."""
+        import server
+        self.assertFalse(server.is_allowed_download_domain(''))
+
+
+class TestServerHandler(unittest.TestCase):
+    """Test server HTTP handler routing, path traversal defense, and proxy behavior."""
+
+    def setUp(self):
+        """Set up mock handler for testing."""
+        import server
+        self.server_module = server
+        # Create a mock handler that can be tested without a real socket
+        self.handler = self._create_mock_handler()
+
+    def _create_mock_handler(self):
+        """Create a ShopeeVideoHandler instance with mocked socket/IO."""
+        import server
+        import io
+        handler = object.__new__(server.ShopeeVideoHandler)
+        handler.wfile = io.BytesIO()
+        handler.rfile = io.BytesIO()
+        handler.requestline = ''
+        handler.client_address = ('127.0.0.1', 12345)
+        handler.request_version = 'HTTP/1.1'
+        handler.headers = {}
+        handler.responses = {}
+        handler._headers_buffer = []
+        # Capture sent responses
+        handler._sent_responses = []
+        handler._sent_headers = []
+        
+        original_send_response = handler.send_response
+        def mock_send_response(code, message=None):
+            handler._sent_responses.append(code)
+        handler.send_response = mock_send_response
+        
+        original_send_header = handler.send_header
+        def mock_send_header(keyword, value):
+            handler._sent_headers.append((keyword, value))
+        handler.send_header = mock_send_header
+        
+        handler.end_headers = lambda: None
+        handler.log_message = lambda format, *args: None
+        
+        return handler
+
+    def test_get_root_serves_index(self):
+        """GET / should serve index.html."""
+        import server
+        handler = self._create_mock_handler()
+        handler.path = '/'
+        
+        # The serve_static method should be called and serve index.html
+        with patch.object(handler, 'serve_static') as mock_serve:
+            handler.do_GET()
+            mock_serve.assert_called_once_with('/')
+
+    def test_get_api_download_routes_to_handler(self):
+        """GET /api/download should route to handle_download."""
+        import server
+        handler = self._create_mock_handler()
+        handler.path = '/api/download?url=http://test.com'
+        
+        with patch.object(handler, 'handle_download') as mock_download:
+            handler.do_GET()
+            mock_download.assert_called_once()
+
+    def test_post_api_extract_routes_to_handler(self):
+        """POST /api/extract should route to handle_extract."""
+        import server
+        handler = self._create_mock_handler()
+        handler.path = '/api/extract'
+        
+        with patch.object(handler, 'handle_extract') as mock_extract:
+            handler.do_POST()
+            mock_extract.assert_called_once()
+
+    def test_post_unknown_returns_404(self):
+        """POST to unknown path should return 404 error."""
+        import server
+        handler = self._create_mock_handler()
+        handler.path = '/api/unknown'
+        
+        with patch.object(handler, 'send_error_json') as mock_error:
+            handler.do_POST()
+            mock_error.assert_called_once_with("Endpoint tidak ditemukan", 404)
+
+    def test_path_traversal_dotdot_rejected(self):
+        """Path traversal with .. should be rejected."""
+        import server
+        handler = self._create_mock_handler()
+        
+        with patch.object(handler, 'send_error_json') as mock_error:
+            handler.serve_static('/../../../etc/passwd')
+            mock_error.assert_called_with("Akses ditolak", 403)
+
+    def test_path_traversal_absolute_rejected(self):
+        """Absolute paths should be rejected by path traversal check."""
+        import server
+        handler = self._create_mock_handler()
+        
+        with patch.object(handler, 'send_error_json') as mock_error:
+            # The normpath of something like '//etc/passwd' on Unix is '/etc/passwd' which is absolute
+            handler.serve_static('//etc/passwd')
+            mock_error.assert_called_with("Akses ditolak", 403)
+
+    def test_download_proxy_rejects_disallowed_domain(self):
+        """Download proxy should reject URLs not on the allowlist."""
+        import server
+        handler = self._create_mock_handler()
+        
+        with patch.object(handler, 'send_error_json') as mock_error:
+            handler.handle_download('url=http%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data%2F')
+            mock_error.assert_called()
+            call_args = mock_error.call_args
+            self.assertIn('403', str(call_args) or '')
+            # Check that the error message references domain restriction
+            self.assertIn("Domain tidak diizinkan", call_args[0][0])
+
+    def test_download_proxy_rejects_empty_url(self):
+        """Download proxy should return error when url param is missing."""
+        import server
+        handler = self._create_mock_handler()
+        
+        with patch.object(handler, 'send_error_json') as mock_error:
+            handler.handle_download('')
+            mock_error.assert_called_with("Parameter 'url' diperlukan")
+
+    def test_download_proxy_rejects_non_http_scheme(self):
+        """Download proxy should reject file:// and ftp:// schemes."""
+        import server
+        handler = self._create_mock_handler()
+        
+        with patch.object(handler, 'send_error_json') as mock_error:
+            handler.handle_download('url=file%3A%2F%2F%2Fetc%2Fpasswd')
+            mock_error.assert_called()
+            self.assertIn("tidak diizinkan", mock_error.call_args[0][0])
+
+    def test_download_proxy_rejects_oversized_content(self):
+        """Download proxy should reject responses exceeding MAX_DOWNLOAD_SIZE."""
+        import server
+        handler = self._create_mock_handler()
+        
+        # Mock urlopen to return a response with huge Content-Length
+        mock_response = MagicMock()
+        mock_response.headers = {'Content-Type': 'video/mp4', 'Content-Length': '999999999999'}
+        mock_response.close = MagicMock()
+        
+        with patch.object(handler, 'send_error_json') as mock_error:
+            with patch('server.urllib.request.urlopen', return_value=mock_response):
+                handler.handle_download('url=https%3A%2F%2Fcf.shopee.co.id%2Fvideo.mp4')
+                mock_error.assert_called()
+                self.assertEqual(mock_error.call_args[0][1], 413)
+
+    def test_download_proxy_allows_shopee_cdn(self):
+        """Download proxy should allow URLs from Shopee CDN domains."""
+        import server
+        handler = self._create_mock_handler()
+        
+        mock_response = MagicMock()
+        mock_response.headers = {'Content-Type': 'video/mp4', 'Content-Length': '1024'}
+        mock_response.read = MagicMock(side_effect=[b'x' * 1024, b''])
+        
+        with patch('server.urllib.request.urlopen', return_value=mock_response):
+            handler.handle_download('url=https%3A%2F%2Fcf.shopee.co.id%2Fvideo%2F12345.mp4')
+            # Should have sent 200 response
+            self.assertIn(200, handler._sent_responses)
+
+    def test_download_proxy_ssl_verification_enabled(self):
+        """Download proxy should use SSL context with verification enabled."""
+        import server
+        handler = self._create_mock_handler()
+        
+        mock_response = MagicMock()
+        mock_response.headers = {'Content-Type': 'video/mp4', 'Content-Length': '100'}
+        mock_response.read = MagicMock(side_effect=[b'x' * 100, b''])
+        
+        captured_ctx = []
+        
+        def mock_urlopen(req, timeout=None, context=None):
+            captured_ctx.append(context)
+            return mock_response
+        
+        with patch('server.urllib.request.urlopen', side_effect=mock_urlopen):
+            handler.handle_download('url=https%3A%2F%2Fcf.shopee.co.id%2Fvideo.mp4')
+        
+        # The SSL context should have verification enabled (default behavior)
+        self.assertEqual(len(captured_ctx), 1)
+        ctx = captured_ctx[0]
+        self.assertNotEqual(ctx.verify_mode, ssl.CERT_NONE)
 
 
 if __name__ == '__main__':

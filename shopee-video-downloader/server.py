@@ -13,6 +13,7 @@ Penggunaan:
 """
 
 import os
+import re
 import sys
 import json
 import ssl
@@ -36,6 +37,48 @@ from extractor import (
 # Konfigurasi
 DEFAULT_PORT = 8000
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+
+# Maximum download proxy response size (default: 500 MB)
+MAX_DOWNLOAD_SIZE = int(os.environ.get('MAX_DOWNLOAD_SIZE', 500 * 1024 * 1024))
+
+# Allowlist of Shopee CDN domains permitted by the download proxy.
+# This prevents SSRF by ensuring only known Shopee media hosts are proxied.
+ALLOWED_DOWNLOAD_DOMAINS = [
+    'cf.shopee.co.id',
+    'cv.shopee.co.id',
+    'mall.shopee.co.id',
+    'cf.shopee.sg',
+    'cf.shopee.com.my',
+    'cf.shopee.ph',
+    'cf.shopee.com.br',
+    'cf.shopee.tw',
+    'cf.shopee.co.th',
+    'cf.shopee.vn',
+]
+
+# Patterns for dynamic CDN subdomains (e.g., down-xx.susercontent.com)
+ALLOWED_DOWNLOAD_DOMAIN_PATTERNS = [
+    re.compile(r'^[a-z0-9-]+\.susercontent\.com$'),
+    re.compile(r'^[a-z0-9-]+\.shopee\.co\.id$'),
+    re.compile(r'^[a-z0-9-]+\.shopee\.sg$'),
+    re.compile(r'^[a-z0-9-]+\.shopee\.com\.my$'),
+    re.compile(r'^[a-z0-9-]+\.shopee\.ph$'),
+    re.compile(r'^[a-z0-9-]+\.shopee\.com\.br$'),
+    re.compile(r'^[a-z0-9-]+\.shopee\.tw$'),
+    re.compile(r'^[a-z0-9-]+\.shopee\.co\.th$'),
+    re.compile(r'^[a-z0-9-]+\.shopee\.vn$'),
+]
+
+
+def is_allowed_download_domain(hostname: str) -> bool:
+    """Check if a hostname is in the allowed download domain list."""
+    hostname = hostname.lower()
+    if hostname in ALLOWED_DOWNLOAD_DOMAINS:
+        return True
+    for pattern in ALLOWED_DOWNLOAD_DOMAIN_PATTERNS:
+        if pattern.match(hostname):
+            return True
+    return False
 
 # Content type mapping
 CONTENT_TYPES = {
@@ -206,7 +249,13 @@ class ShopeeVideoHandler(BaseHTTPRequestHandler):
             self.send_error_json(f"Terjadi error internal: {str(e)}", 500)
     
     def handle_download(self, query_string: str):
-        """Handle GET /api/download - proxy download video."""
+        """Handle GET /api/download - proxy download video.
+        
+        Security measures:
+        - Domain allowlist: Only proxies content from known Shopee CDN domains
+        - Content-Length cap: Rejects responses larger than MAX_DOWNLOAD_SIZE
+        - TLS verification enabled: Validates server certificates to prevent MITM
+        """
         params = urllib.parse.parse_qs(query_string)
         url = params.get('url', [None])[0]
         
@@ -218,10 +267,27 @@ class ShopeeVideoHandler(BaseHTTPRequestHandler):
             # Decode URL jika perlu
             url = urllib.parse.unquote(url)
             
-            # Buat request ke video URL
+            # SSRF protection: validate target domain against allowlist
+            parsed_url = urllib.parse.urlparse(url)
+            hostname = parsed_url.hostname
+            scheme = parsed_url.scheme
+            
+            if scheme not in ('http', 'https'):
+                self.send_error_json("Skema URL tidak diizinkan", 403)
+                return
+            
+            if not hostname or not is_allowed_download_domain(hostname):
+                self.send_error_json(
+                    "Domain tidak diizinkan. Hanya domain CDN Shopee yang diperbolehkan.",
+                    403
+                )
+                return
+            
+            # Use proper SSL verification for the download proxy path.
+            # Unlike the Shopee API calls (which may need relaxed verification due to
+            # certificate issues with some Shopee endpoints), the download proxy should
+            # verify certificates to protect users from MITM attacks.
             ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
             
             req = urllib.request.Request(url)
             req.add_header('User-Agent',
@@ -232,14 +298,30 @@ class ShopeeVideoHandler(BaseHTTPRequestHandler):
             
             response = urllib.request.urlopen(req, timeout=30, context=ctx)
             
+            # Content-Length cap: reject responses that exceed the configured maximum
+            content_length_str = response.headers.get('Content-Length')
+            if content_length_str:
+                try:
+                    content_length = int(content_length_str)
+                    if content_length > MAX_DOWNLOAD_SIZE:
+                        response.close()
+                        self.send_error_json(
+                            f"File terlalu besar (maks {MAX_DOWNLOAD_SIZE // (1024*1024)} MB)",
+                            413
+                        )
+                        return
+                except (ValueError, TypeError):
+                    content_length = None
+            else:
+                content_length = None
+            
             # Kirim header
             content_type = response.headers.get('Content-Type', 'video/mp4')
-            content_length = response.headers.get('Content-Length')
             
             self.send_response(200)
             self.send_header('Content-Type', content_type)
-            if content_length:
-                self.send_header('Content-Length', content_length)
+            if content_length is not None:
+                self.send_header('Content-Length', str(content_length))
             self.send_header(
                 'Content-Disposition',
                 'attachment; filename="shopee_video.mp4"'
@@ -247,11 +329,17 @@ class ShopeeVideoHandler(BaseHTTPRequestHandler):
             self.send_cors_headers()
             self.end_headers()
             
-            # Stream content
+            # Stream content with size enforcement
             chunk_size = 65536
+            bytes_read = 0
             while True:
                 chunk = response.read(chunk_size)
                 if not chunk:
+                    break
+                bytes_read += len(chunk)
+                if bytes_read > MAX_DOWNLOAD_SIZE:
+                    # Stop streaming if we exceed the limit even without
+                    # Content-Length header
                     break
                 self.wfile.write(chunk)
                 

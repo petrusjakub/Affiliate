@@ -1,0 +1,25 @@
+{
+  "id": "FEAT-002",
+  "type": "fix",
+  "description": "Security hardening: Fix SSRF in download proxy (domain allowlist), add Content-Length cap, re-enable TLS verification on download proxy path (document trade-off for Shopee API calls), and add server handler tests.",
+  "status": "in_progress",
+  "steps": [
+    "Add domain allowlist to /api/download proxy in server.py to prevent SSRF - only allow known Shopee CDN domains",
+    "Add configurable max response size (Content-Length cap) for the download proxy",
+    "Re-enable SSL certificate verification on the download proxy path in server.py; document trade-off for Shopee API calls in extractor.py",
+    "Add server handler tests (routing, path-traversal defense, download proxy behavior) to tests/test_extractor.py"
+  ],
+  "acceptance_criteria": [
+    "Download proxy rejects URLs not matching Shopee CDN domain allowlist",
+    "Download proxy enforces a maximum content size limit",
+    "Download proxy uses proper SSL verification",
+    "Server handler tests cover routing, path traversal rejection, and proxy domain validation",
+    "All existing and new tests pass"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/Affiliate && python3 -m unittest discover -s shopee-video-downloader/tests/ -v",
+    "Run: cd /projects/sandbox/Affiliate && python3 -c \"import py_compile; py_compile.compile('shopee-video-downloader/server.py', doraise=True); py_compile.compile('shopee-video-downloader/extractor.py', doraise=True)\""
+  ],
+  "blocked_reason": null,
+  "findings": null
+}
