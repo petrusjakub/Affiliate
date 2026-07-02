@@ -68,7 +68,7 @@ export default function App() {
       return;
     }
     const lower = url.toLowerCase();
-    if (lower.includes('shopee')) {
+    if (lower.includes('shopee') || lower.includes('shp.ee')) {
       setDetectedPlatform('shopee');
     } else if (lower.includes('tiktok')) {
       setDetectedPlatform('tiktok');
@@ -76,7 +76,7 @@ export default function App() {
       setDetectedPlatform('instagram');
     } else if (lower.includes('facebook') || lower.includes('fb.watch') || lower.includes('fb.com')) {
       setDetectedPlatform('facebook');
-    } else if (lower.includes('threads.net')) {
+    } else if (lower.includes('threads.net') || lower.includes('threads.com')) {
       setDetectedPlatform('threads');
     } else {
       setDetectedPlatform(null);
