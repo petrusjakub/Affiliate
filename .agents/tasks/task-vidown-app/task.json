@@ -1,0 +1,7 @@
+{
+  "task_id": "task-vidown-app",
+  "task_description": "Create a complete React application (vIDown - Video Multi-Downloader) using Vite + React + TailwindCSS + lucide-react in /projects/sandbox/Affiliate/vidown-app/. The app features sidebar navigation with 4 tabs, AI chat with Gemini API, mock video downloading, and a dark-themed responsive UI.",
+  "status": "in_progress",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null
+}

@@ -1,0 +1,33 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create the complete Shopee Video Downloader web application with Python backend (stdlib only) and HTML/CSS/JS frontend. The app accepts Shopee video URLs, extracts video download URLs using Shopee's internal API, and provides a download button. All in a self-contained directory shopee-video-downloader/ at the repo root.",
+  "status": "completed",
+  "steps": [
+    "Create directory structure: shopee-video-downloader/, shopee-video-downloader/static/, shopee-video-downloader/tests/",
+    "Create shopee-video-downloader/extractor.py - the core extraction module that: (a) Parses Shopee video URLs (formats: https://shopee.co.id/video/XXXXX, https://shopee.co.id/universal-link/..., short share links like https://s.shopee.co.id/...), (b) Resolves short URLs by following redirects using urllib.request, (c) Fetches video page/API data to extract the direct video URL. Shopee videos are typically served from media endpoints. The extractor should: parse the video ID from the URL, make requests to Shopee's web API endpoint (e.g., https://shopee.co.id/api/v4/video/get?video_id=VIDEO_ID) to get video metadata including the playback URL, and return the direct MP4 URL, thumbnail, title, and duration if available. Include proper error handling and User-Agent headers.",
+    "Create shopee-video-downloader/server.py - HTTP server using http.server stdlib that: (a) Serves static files from static/ directory on GET /, (b) Handles POST /api/extract endpoint that accepts JSON body {url: string}, calls extractor.py, and returns JSON response with video info or error, (c) Handles GET /api/download?url=VIDEO_URL that proxies the video download to avoid CORS issues (streams the video from Shopee's CDN to the client), (d) Runs on port 8000 by default (configurable via PORT env var), (e) Includes CORS headers for local development",
+    "Create shopee-video-downloader/static/index.html - clean, modern single-page interface with: (a) Header with app title and description in Indonesian, (b) Input field with placeholder text for pasting Shopee video link, (c) Submit/Extract button, (d) Loading state indicator, (e) Result area showing: video thumbnail preview, video title/duration info, download button, (f) Error display area, (g) Footer with usage instructions. Use Indonesian language for UI text.",
+    "Create shopee-video-downloader/static/style.css - modern responsive CSS styling: (a) Clean card-based layout centered on page, (b) Gradient or solid color header, (c) Styled input field and button with hover/active states, (d) Loading spinner animation using CSS only, (e) Result card with thumbnail and download button, (f) Mobile-responsive design, (g) Color scheme that matches Shopee's orange branding (#EE4D2D)",
+    "Create shopee-video-downloader/static/script.js - frontend JavaScript: (a) Handle form submission (click + Enter key), (b) Input validation (check URL format before sending to server), (c) Fetch API call to POST /api/extract with the URL, (d) Display loading state while waiting, (e) Render video info and download button on success, (f) Show error messages on failure, (g) Download button triggers download via /api/download proxy endpoint, (h) Copy link functionality",
+    "Create shopee-video-downloader/README.md - documentation in Indonesian covering: what the app does, how to run it, supported URL formats, technical architecture, and deployment notes",
+    "Create shopee-video-downloader/tests/test_extractor.py - unit tests using unittest: (a) Test URL parsing for various Shopee URL formats, (b) Test video ID extraction from different URL patterns, (c) Test error handling for invalid URLs, (d) Test response parsing from mock API data. Use unittest.mock to mock urllib.request calls since no network is available."
+  ],
+  "acceptance_criteria": [
+    "python3 shopee-video-downloader/server.py starts without errors and listens on port 8000",
+    "GET http://localhost:8000/ returns the HTML page with proper content-type",
+    "GET http://localhost:8000/style.css returns CSS",
+    "GET http://localhost:8000/script.js returns JavaScript",
+    "POST /api/extract with invalid URL returns JSON error response with appropriate message",
+    "POST /api/extract with valid-format Shopee URL returns JSON (either video data or connection error since we cannot reach Shopee in this environment)",
+    "python3 -m unittest discover -s shopee-video-downloader/tests/ runs and passes all unit tests",
+    "All Python files pass syntax check with py_compile"
+  ],
+  "verification": [
+    "Run: cd /projects/sandbox/Affiliate && python3 -c \"import py_compile; py_compile.compile('shopee-video-downloader/server.py', doraise=True); py_compile.compile('shopee-video-downloader/extractor.py', doraise=True)\"",
+    "Run: cd /projects/sandbox/Affiliate && python3 -m unittest discover -s shopee-video-downloader/tests/ -v",
+    "Run: cd /projects/sandbox/Affiliate && python3 shopee-video-downloader/server.py & sleep 2 && curl -s http://localhost:8000/ | head -5 && curl -s -X POST http://localhost:8000/api/extract -H 'Content-Type: application/json' -d '{\"url\":\"https://shopee.co.id/video/12345\"}' && kill %1"
+  ],
+  "blocked_reason": null,
+  "findings": "All 46 tests pass. Server correctly serves static files (HTML/CSS/JS) and handles API endpoints. POST /api/extract returns proper error JSON for invalid URLs (400) and returns 502 with descriptive error when Shopee API is unreachable (expected in no-network environment). py_compile passes for all Python files."
+}

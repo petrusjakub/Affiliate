@@ -1,0 +1,25 @@
+{
+  "project_type": "Vite + React + TailwindCSS single-page application",
+  "language": "JavaScript (React/JSX)",
+  "build_system": "Vite via npm scripts",
+  "test_framework": "None (greenfield project, no tests specified)",
+  "build_command": "cd /projects/sandbox/Affiliate/vidown-app && unset NODE_OPTIONS && npm run build",
+  "test_command": "N/A - no tests specified for this project",
+  "verification_instructions": "1. Run npm run build to confirm the project compiles without errors. 2. Check that dist/ directory is created with index.html and JS/CSS bundles.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "1. Create vidown-app directory. 2. Initialize with npm create vite@latest (React template). 3. Install tailwindcss, postcss, autoprefixer, lucide-react. 4. Configure tailwind.config.js, postcss.config.js, vite.config.js.",
+  "environment_constraints": "Must run 'unset NODE_OPTIONS' before any npm/node commands due to a proxy-bootstrap.js preload module issue in the sandbox. Node v22.22.3, npm 11.4.2 available.",
+  "contribution_requirements": "N/A - new standalone project",
+  "key_patterns": "Standard Vite+React project structure: index.html at root, src/main.jsx entry, src/App.jsx main component, src/index.css with Tailwind directives.",
+  "relevant_files": [
+    "/projects/sandbox/Affiliate/vidown-app/package.json",
+    "/projects/sandbox/Affiliate/vidown-app/vite.config.js",
+    "/projects/sandbox/Affiliate/vidown-app/tailwind.config.js",
+    "/projects/sandbox/Affiliate/vidown-app/postcss.config.js",
+    "/projects/sandbox/Affiliate/vidown-app/index.html",
+    "/projects/sandbox/Affiliate/vidown-app/src/main.jsx",
+    "/projects/sandbox/Affiliate/vidown-app/src/index.css",
+    "/projects/sandbox/Affiliate/vidown-app/src/App.jsx"
+  ],
+  "directory_structure": "vidown-app/ - Vite project root with index.html, config files, and src/ containing main.jsx, App.jsx, index.css"
+}

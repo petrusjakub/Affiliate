@@ -1,0 +1,34 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Create the complete vidown-app Vite+React+TailwindCSS project with all configuration files, the App.jsx component, and install dependencies",
+  "status": "in_progress",
+  "steps": [
+    "Create directory /projects/sandbox/Affiliate/vidown-app/src/",
+    "Create /projects/sandbox/Affiliate/vidown-app/package.json with dependencies: react, react-dom, lucide-react as dependencies; vite, @vitejs/plugin-react, tailwindcss, postcss, autoprefixer as devDependencies",
+    "Create /projects/sandbox/Affiliate/vidown-app/vite.config.js with React plugin",
+    "Create /projects/sandbox/Affiliate/vidown-app/tailwind.config.js scanning ./src/**/*.{js,jsx} and ./index.html",
+    "Create /projects/sandbox/Affiliate/vidown-app/postcss.config.js with tailwindcss and autoprefixer plugins",
+    "Create /projects/sandbox/Affiliate/vidown-app/index.html with root div and script module pointing to /src/main.jsx, title 'vIDown - Video Multi-Downloader'",
+    "Create /projects/sandbox/Affiliate/vidown-app/src/main.jsx importing React, ReactDOM, App, and index.css, rendering App in StrictMode",
+    "Create /projects/sandbox/Affiliate/vidown-app/src/index.css with @tailwind base/components/utilities directives and custom @keyframes for fadeIn (opacity 0->1 + translateY 10px->0) and scaleIn (scale 0.95->1 + opacity 0->1)",
+    "Create /projects/sandbox/Affiliate/vidown-app/src/App.jsx with the full multi-platform video downloader component including: imports from lucide-react (Download, Sparkles, BookOpen, Code, History, Link2, AlertCircle, CheckCircle, Play, RefreshCw, Send, FileVideo, Eye, Info, HelpCircle, Smartphone, Copy, Check, ChevronRight, Menu, X), 4 sidebar tabs (download, ai-chat, guides, developer), platform auto-detection for shopee/tiktok/instagram/facebook, mock download with progress simulation, AI chat with Gemini API (gemini-2.5-flash-preview-09-2025 model), download history, clipboard paste, video preview, developer API section with Python code snippet, responsive mobile with hamburger menu, dark theme (slate-950)",
+    "Run 'unset NODE_OPTIONS && npm install' in the vidown-app directory to install all dependencies",
+    "Run 'unset NODE_OPTIONS && npm run build' to verify the project compiles successfully"
+  ],
+  "acceptance_criteria": [
+    "All project files exist at the correct paths",
+    "npm install completes without errors",
+    "npm run build completes without errors and produces a dist/ directory",
+    "App.jsx contains all 4 tabs (download, ai-chat, guides, developer)",
+    "App.jsx imports all specified lucide-react icons",
+    "App.jsx includes Gemini API integration with model gemini-2.5-flash-preview-09-2025",
+    "index.css includes fadeIn and scaleIn keyframe animations",
+    "tailwind.config.js is properly configured"
+  ],
+  "verification": [
+    "Run 'cd /projects/sandbox/Affiliate/vidown-app && unset NODE_OPTIONS && npm run build' - should exit 0 and create dist/ directory"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

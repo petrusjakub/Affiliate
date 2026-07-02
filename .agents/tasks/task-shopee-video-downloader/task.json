@@ -1,0 +1,14 @@
+{
+  "task_id": "task-shopee-video-downloader",
+  "task_description": "Create a web application for downloading Shopee videos without watermark, similar to shopeenowatermark.com. The app has a Python backend (stdlib only, no external packages) and HTML/CSS/JS frontend. It accepts Shopee video URLs, extracts the direct video download URL, and provides download functionality.",
+  "status": "completed",
+  "feature_order": ["FEAT-001"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "All 64 unit tests pass. Both server.py and extractor.py compile cleanly. Server starts correctly on port 8000, serves static files, returns proper JSON error responses, and blocks SSRF attempts on the download proxy. Semantic review v2 approved."
+  }
+}

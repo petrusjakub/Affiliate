@@ -1,0 +1,24 @@
+{
+  "project_type": "Python web application (Shopee Video Downloader) - greenfield project within an existing affiliate marketing repo",
+  "language": "Python 3.9 (backend), HTML/CSS/JavaScript (frontend)",
+  "build_system": "None - pure Python stdlib, no package manager needed",
+  "test_framework": "Python unittest (stdlib) - no external test frameworks available",
+  "build_command": "python3 -c \"import py_compile; py_compile.compile('shopee-video-downloader/server.py', doraise=True)\"",
+  "test_command": "python3 -m pytest shopee-video-downloader/tests/ || python3 -m unittest discover -s shopee-video-downloader/tests/",
+  "verification_instructions": "1. Run python3 shopee-video-downloader/server.py in background. 2. curl http://localhost:8000/ should return HTML page. 3. curl -X POST http://localhost:8000/api/extract -H 'Content-Type: application/json' -d '{\"url\":\"https://shopee.co.id/video/12345\"}' should return JSON response (may error without real video but should return proper error format). 4. Kill the server.",
+  "snapshot_or_generated_files": null,
+  "setup_instructions": "No setup needed - uses only Python stdlib. Run: python3 shopee-video-downloader/server.py",
+  "environment_constraints": "INTEGRATIONS_ONLY network mode - NO external network access. Cannot install pip/npm packages. Cannot reach external APIs during testing. Must use only Python stdlib (http.server, urllib, json, re, html.parser, ssl). Node.js is available but npm is not, so use Python. The actual Shopee API calls will only work when deployed with internet access.",
+  "contribution_requirements": "No CONTRIBUTING.md present. Repository contains markdown content files on branch feature/dna-kreator-framework.",
+  "key_patterns": "Repository is a content/marketing repo with markdown files. New app should be self-contained in its own directory.",
+  "relevant_files": [
+    "shopee-video-downloader/server.py (new - main backend server)",
+    "shopee-video-downloader/static/index.html (new - frontend UI)",
+    "shopee-video-downloader/static/style.css (new - styling)",
+    "shopee-video-downloader/static/script.js (new - frontend logic)",
+    "shopee-video-downloader/extractor.py (new - video URL extraction logic)",
+    "shopee-video-downloader/README.md (new - documentation)",
+    "shopee-video-downloader/tests/test_extractor.py (new - unit tests)"
+  ],
+  "directory_structure": "shopee-video-downloader/ - self-contained app directory within the Affiliate repo root. Contains server.py (entry point), extractor.py (extraction logic), static/ (frontend files), tests/ (unit tests), and README.md"
+}
