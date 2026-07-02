@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shopee Video Downloader - Download Video Shopee Tanpa Watermark</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1 class="header-title">Shopee Video Downloader</h1>
+                <p class="header-subtitle">Download video dari Shopee tanpa watermark dengan mudah dan cepat</p>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Input Section -->
+            <div class="input-section">
+                <div class="input-wrapper">
+                    <input 
+                        type="text" 
+                        id="url-input" 
+                        class="url-input"
+                        placeholder="Paste link video Shopee di sini... (contoh: https://shopee.co.id/video/12345)"
+                        autocomplete="off"
+                        spellcheck="false"
+                    >
+                    <button id="extract-btn" class="extract-btn" type="button">
+                        <span class="btn-text">Download</span>
+                        <span class="btn-loading hidden">
+                            <span class="spinner"></span>
+                        </span>
+                    </button>
+                </div>
+                <p class="input-hint">Mendukung link: shopee.co.id/video/..., s.shopee.co.id/..., dan link share Shopee lainnya</p>
+            </div>
+
+            <!-- Error Display -->
+            <div id="error-section" class="error-section hidden">
+                <div class="error-card">
+                    <span class="error-icon">&#9888;</span>
+                    <p id="error-message" class="error-message"></p>
+                </div>
+            </div>
+
+            <!-- Loading State -->
+            <div id="loading-section" class="loading-section hidden">
+                <div class="loading-card">
+                    <div class="loading-spinner"></div>
+                    <p class="loading-text">Sedang mengekstrak video...</p>
+                </div>
+            </div>
+
+            <!-- Result Section -->
+            <div id="result-section" class="result-section hidden">
+                <div class="result-card">
+                    <div class="video-preview">
+                        <img id="video-thumbnail" class="video-thumbnail" src="" alt="Video Thumbnail">
+                        <div class="video-duration" id="video-duration"></div>
+                    </div>
+                    <div class="video-info">
+                        <h3 id="video-title" class="video-title"></h3>
+                        <p id="video-id-display" class="video-id"></p>
+                    </div>
+                    <div class="action-buttons">
+                        <a id="download-btn" class="download-btn" href="#" download>
+                            <span class="download-icon">&#8681;</span>
+                            Download Video
+                        </a>
+                        <button id="copy-link-btn" class="copy-link-btn" type="button">
+                            <span class="copy-icon">&#128203;</span>
+                            Salin Link
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-content">
+                <h4>Cara Menggunakan:</h4>
+                <ol class="usage-steps">
+                    <li>Buka aplikasi Shopee dan temukan video yang ingin di-download</li>
+                    <li>Tap tombol "Share" dan salin link video</li>
+                    <li>Paste link di kolom input di atas</li>
+                    <li>Klik tombol "Download" dan tunggu proses ekstraksi</li>
+                    <li>Klik tombol download untuk menyimpan video</li>
+                </ol>
+                <p class="footer-note">
+                    <strong>Format URL yang didukung:</strong><br>
+                    - https://shopee.co.id/video/VIDEO_ID<br>
+                    - https://shopee.co.id/universal-link/video/VIDEO_ID<br>
+                    - https://s.shopee.co.id/XXXXX (short link)
+                </p>
+            </div>
+        </footer>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
