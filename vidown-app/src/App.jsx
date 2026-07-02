@@ -1,11 +1,344 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Download, Sparkles, BookOpen, Code, History, Link2, CheckCircle,
-  RefreshCw, Send, FileVideo, Info, Smartphone, Copy, Check, Menu, X
+  RefreshCw, Send, FileVideo, Info, Smartphone, Copy, Check, Menu, X,
+  Play
 } from 'lucide-react';
 
 const apiKey = "";
 const modelName = "gemini-2.5-flash-preview-09-2025";
+
+// CORS proxy options for bypassing browser restrictions
+const CORS_PROXIES = [
+  'https://corsproxy.io/?',
+  'https://api.allorigins.win/raw?url=',
+];
+
+// Helper: try fetch with CORS proxy fallback
+async function fetchWithProxy(url, options = {}) {
+  // First try direct fetch
+  try {
+    const res = await fetch(url, options);
+    if (res.ok) return res;
+  } catch (e) {
+    // Direct fetch failed, try proxies
+  }
+  // Try CORS proxies for GET requests only
+  if (!options.method || options.method === 'GET') {
+    for (const proxy of CORS_PROXIES) {
+      try {
+        const res = await fetch(proxy + encodeURIComponent(url));
+        if (res.ok) return res;
+      } catch (e) {
+        continue;
+      }
+    }
+  }
+  throw new Error('All fetch attempts failed');
+}
+
+// Download API implementations for each platform
+const downloadAPIs = {
+  tiktok: async (videoUrl) => {
+    // Primary: tikwm.com API
+    const response = await fetch('https://www.tikwm.com/api/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ url: videoUrl, hd: '1' }),
+    });
+    if (!response.ok) throw new Error('TikWM API request failed');
+    const data = await response.json();
+    if (data.code !== 0 || !data.data) {
+      throw new Error(data.msg || 'Failed to extract TikTok video');
+    }
+    const videoData = data.data;
+    return {
+      videoUrl: videoData.hdplay || videoData.play,
+      title: videoData.title || 'TikTok Video',
+      thumbnail: videoData.cover || videoData.origin_cover,
+      duration: videoData.duration ? `${Math.floor(videoData.duration / 60)}:${String(videoData.duration % 60).padStart(2, '0')}` : 'N/A',
+      quality: videoData.hdplay ? '1080p HD' : '720p',
+      author: videoData.author?.nickname || 'Unknown',
+    };
+  },
+
+  instagram: async (videoUrl) => {
+    // Try multiple Instagram download APIs
+    const apis = [
+      {
+        name: 'saveig',
+        fetch: async () => {
+          const res = await fetch('https://v3.saveig.app/api/ajaxSearch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ q: videoUrl, t: 'media', lang: 'en' }),
+          });
+          if (!res.ok) throw new Error('SaveIG API failed');
+          const data = await res.json();
+          if (!data.data) throw new Error('No data from SaveIG');
+          // Parse HTML response to extract download link
+          const urlMatch = data.data.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/i) 
+            || data.data.match(/href="(https?:\/\/[^"]+)"/i);
+          if (!urlMatch) throw new Error('Could not extract video URL from SaveIG');
+          return {
+            videoUrl: urlMatch[1].replace(/&amp;/g, '&'),
+            title: 'Instagram Reel',
+            thumbnail: null,
+            duration: 'N/A',
+            quality: '720p',
+            author: 'Instagram User',
+          };
+        }
+      },
+      {
+        name: 'snapinsta',
+        fetch: async () => {
+          const res = await fetch('https://snapinsta.app/action2.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ url: videoUrl }),
+          });
+          if (!res.ok) throw new Error('SnapInsta API failed');
+          const html = await res.text();
+          const urlMatch = html.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/i)
+            || html.match(/"downloadUrl"\s*:\s*"(https?:\/\/[^"]+)"/i);
+          if (!urlMatch) throw new Error('Could not extract from SnapInsta');
+          return {
+            videoUrl: urlMatch[1].replace(/\\u0026/g, '&').replace(/&amp;/g, '&'),
+            title: 'Instagram Reel',
+            thumbnail: null,
+            duration: 'N/A',
+            quality: '720p',
+            author: 'Instagram User',
+          };
+        }
+      }
+    ];
+
+    let lastError = null;
+    for (const api of apis) {
+      try {
+        return await api.fetch();
+      } catch (e) {
+        lastError = e;
+        continue;
+      }
+    }
+    throw new Error(`Instagram download failed: ${lastError?.message || 'All APIs unavailable'}`);
+  },
+
+  facebook: async (videoUrl) => {
+    // Try Facebook video download APIs
+    const apis = [
+      {
+        name: 'getmyfb',
+        fetch: async () => {
+          const res = await fetch('https://getmyfb.com/process', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ id: videoUrl, locale: 'en' }),
+          });
+          if (!res.ok) throw new Error('GetMyFB API failed');
+          const html = await res.text();
+          const hdMatch = html.match(/href="(https?:\/\/[^"]+)" [^>]*>.*?HD/i);
+          const sdMatch = html.match(/href="(https?:\/\/[^"]+)" [^>]*>.*?SD/i);
+          const anyMatch = html.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/i);
+          const downloadUrl = hdMatch?.[1] || sdMatch?.[1] || anyMatch?.[1];
+          if (!downloadUrl) throw new Error('Could not extract Facebook video URL');
+          return {
+            videoUrl: downloadUrl.replace(/&amp;/g, '&'),
+            title: 'Facebook Video',
+            thumbnail: null,
+            duration: 'N/A',
+            quality: hdMatch ? '720p HD' : '360p SD',
+            author: 'Facebook User',
+          };
+        }
+      },
+      {
+        name: 'fbdown',
+        fetch: async () => {
+          const res = await fetch('https://fbdown.net/download.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ URLz: videoUrl }),
+          });
+          if (!res.ok) throw new Error('FBDown API failed');
+          const html = await res.text();
+          const urlMatch = html.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/i)
+            || html.match(/id="hdlink"[^>]*href="(https?:\/\/[^"]+)"/i)
+            || html.match(/id="sdlink"[^>]*href="(https?:\/\/[^"]+)"/i);
+          if (!urlMatch) throw new Error('Could not extract from FBDown');
+          return {
+            videoUrl: urlMatch[1].replace(/&amp;/g, '&'),
+            title: 'Facebook Video',
+            thumbnail: null,
+            duration: 'N/A',
+            quality: '720p',
+            author: 'Facebook User',
+          };
+        }
+      }
+    ];
+
+    let lastError = null;
+    for (const api of apis) {
+      try {
+        return await api.fetch();
+      } catch (e) {
+        lastError = e;
+        continue;
+      }
+    }
+    throw new Error(`Facebook download failed: ${lastError?.message || 'All APIs unavailable'}`);
+  },
+
+  threads: async (videoUrl) => {
+    // Threads uses similar approach to Instagram
+    const apis = [
+      {
+        name: 'saveig-threads',
+        fetch: async () => {
+          const res = await fetch('https://v3.saveig.app/api/ajaxSearch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ q: videoUrl, t: 'media', lang: 'en' }),
+          });
+          if (!res.ok) throw new Error('SaveIG Threads API failed');
+          const data = await res.json();
+          if (!data.data) throw new Error('No data from SaveIG for Threads');
+          const urlMatch = data.data.match(/href="(https?:\/\/[^"]+\.mp4[^"]*)"/i)
+            || data.data.match(/href="(https?:\/\/[^"]+)"/i);
+          if (!urlMatch) throw new Error('Could not extract Threads video URL');
+          return {
+            videoUrl: urlMatch[1].replace(/&amp;/g, '&'),
+            title: 'Threads Video',
+            thumbnail: null,
+            duration: 'N/A',
+            quality: '720p',
+            author: 'Threads User',
+          };
+        }
+      }
+    ];
+
+    let lastError = null;
+    for (const api of apis) {
+      try {
+        return await api.fetch();
+      } catch (e) {
+        lastError = e;
+        continue;
+      }
+    }
+    throw new Error(`Threads download failed: ${lastError?.message || 'All APIs unavailable'}`);
+  },
+
+  shopee: async (videoUrl) => {
+    // Shopee video extraction - try to parse video ID from URL and use Shopee CDN
+    const apis = [
+      {
+        name: 'tikwm-universal',
+        fetch: async () => {
+          // Some universal downloaders can handle Shopee links
+          const res = await fetch('https://www.tikwm.com/api/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ url: videoUrl, hd: '1' }),
+          });
+          if (!res.ok) throw new Error('TikWM universal API failed for Shopee');
+          const data = await res.json();
+          if (data.code !== 0 || !data.data) {
+            throw new Error('TikWM could not process Shopee URL');
+          }
+          return {
+            videoUrl: data.data.hdplay || data.data.play,
+            title: data.data.title || 'Shopee Video',
+            thumbnail: data.data.cover,
+            duration: 'N/A',
+            quality: '720p',
+            author: 'Shopee Seller',
+          };
+        }
+      },
+      {
+        name: 'direct-extract',
+        fetch: async () => {
+          // Try to fetch the page and extract video URL from metadata
+          const proxyUrl = CORS_PROXIES[0] + encodeURIComponent(videoUrl);
+          const res = await fetch(proxyUrl);
+          if (!res.ok) throw new Error('Cannot fetch Shopee page');
+          const html = await res.text();
+          // Look for video URL patterns in Shopee page
+          const videoMatch = html.match(/"videoUrl"\s*:\s*"(https?:\/\/[^"]+)"/i)
+            || html.match(/property="og:video"\s+content="(https?:\/\/[^"]+)"/i)
+            || html.match(/property="og:video:url"\s+content="(https?:\/\/[^"]+)"/i)
+            || html.match(/"playUrl"\s*:\s*"(https?:\/\/[^"]+)"/i)
+            || html.match(/video[_-]?url['"]\s*:\s*['"](https?:\/\/[^'"]+)/i);
+          if (!videoMatch) throw new Error('Could not find video in Shopee page');
+          return {
+            videoUrl: videoMatch[1].replace(/\\u002F/g, '/').replace(/\\\//g, '/'),
+            title: 'Shopee Video',
+            thumbnail: null,
+            duration: 'N/A',
+            quality: '720p',
+            author: 'Shopee Seller',
+          };
+        }
+      }
+    ];
+
+    let lastError = null;
+    for (const api of apis) {
+      try {
+        return await api.fetch();
+      } catch (e) {
+        lastError = e;
+        continue;
+      }
+    }
+    throw new Error(`Shopee download failed: ${lastError?.message || 'All APIs unavailable'}. Try copying the direct video URL from the Shopee app.`);
+  },
+};
+
+// Universal fallback using cobalt API
+async function cobaltFallback(videoUrl) {
+  const res = await fetch('https://api.cobalt.tools/api/json', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify({ url: videoUrl, vQuality: '720' }),
+  });
+  if (!res.ok) throw new Error('Cobalt API request failed');
+  const data = await res.json();
+  if (data.status === 'error') {
+    throw new Error(data.text || 'Cobalt could not process this URL');
+  }
+  if (data.status === 'redirect' || data.status === 'stream') {
+    return {
+      videoUrl: data.url,
+      title: 'Downloaded Video',
+      thumbnail: null,
+      duration: 'N/A',
+      quality: '720p',
+      author: 'Unknown',
+    };
+  }
+  if (data.status === 'picker' && data.picker?.length > 0) {
+    const videoItem = data.picker.find(p => p.type === 'video') || data.picker[0];
+    return {
+      videoUrl: videoItem.url,
+      title: 'Downloaded Video',
+      thumbnail: videoItem.thumb || null,
+      duration: 'N/A',
+      quality: '720p',
+      author: 'Unknown',
+    };
+  }
+  throw new Error('Cobalt returned unexpected response');
+}
 
 const platforms = {
   shopee: {
@@ -60,6 +393,7 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
   const chatEndRef = useRef(null);
 
   useEffect(() => {
@@ -100,6 +434,7 @@ export default function App() {
 
   const triggerDownload = async () => {
     setErrorMessage('');
+    setVideoPreviewUrl(null);
     if (!url) {
       setErrorMessage('Please paste a video URL first!');
       return;
@@ -108,51 +443,136 @@ export default function App() {
       setErrorMessage('Platform not detected. Please paste a valid URL from Shopee, TikTok, Instagram, Facebook, or Threads.');
       return;
     }
+
     setDownloadState('analyzing');
-    setDownloadProgress(0);
-    setStatusMessage('Analyzing URL...');
+    setDownloadProgress(10);
+    setStatusMessage('Analyzing URL and detecting platform...');
 
-    const stages = [
-      { progress: 25, message: 'Connecting to server...', delay: 800 },
-      { progress: 50, message: 'Extracting video metadata...', delay: 1200 },
-      { progress: 75, message: 'Downloading video...', delay: 1500 },
-      { progress: 100, message: 'Download complete!', delay: 1000 }
-    ];
+    try {
+      // Step 1: Connecting to platform API
+      setDownloadProgress(25);
+      setStatusMessage(`Connecting to ${platforms[detectedPlatform].name} API...`);
+      setDownloadState('downloading');
 
-    setDownloadState('downloading');
+      let result = null;
 
-    for (const stage of stages) {
-      await new Promise(resolve => setTimeout(resolve, stage.delay));
-      setDownloadProgress(stage.progress);
-      setStatusMessage(stage.message);
+      // Step 2: Try platform-specific API first
+      setDownloadProgress(40);
+      setStatusMessage(`Extracting video from ${platforms[detectedPlatform].name}...`);
+
+      try {
+        const platformAPI = downloadAPIs[detectedPlatform];
+        if (platformAPI) {
+          result = await platformAPI(url);
+        }
+      } catch (platformError) {
+        // Platform-specific API failed, try cobalt as fallback
+        setDownloadProgress(60);
+        setStatusMessage('Primary API failed, trying alternative server...');
+
+        try {
+          result = await cobaltFallback(url);
+        } catch (cobaltError) {
+          throw new Error(
+            `Could not download from ${platforms[detectedPlatform].name}. ` +
+            `Primary: ${platformError.message}. ` +
+            `Fallback: ${cobaltError.message}`
+          );
+        }
+      }
+
+      if (!result || !result.videoUrl) {
+        throw new Error('Could not extract video URL. The video may be private or the link is invalid.');
+      }
+
+      // Step 3: Video extracted successfully
+      setDownloadProgress(90);
+      setStatusMessage('Video extracted successfully!');
+
+      // Set video preview URL
+      setVideoPreviewUrl(result.videoUrl);
+
+      await new Promise(resolve => setTimeout(resolve, 300));
+      setDownloadProgress(100);
+      setStatusMessage('Ready to save!');
+
+      const downloadResultData = {
+        id: Date.now().toString(),
+        platform: detectedPlatform,
+        url: url,
+        title: result.title || `Video from ${platforms[detectedPlatform].name}`,
+        thumbnail: result.thumbnail,
+        videoUrl: result.videoUrl,
+        duration: result.duration || 'N/A',
+        quality: result.quality || '720p',
+        author: result.author || 'Unknown',
+        timestamp: new Date().toLocaleString()
+      };
+
+      setDownloadResult(downloadResultData);
+      setDownloadState('completed');
+      setHistory(prev => [downloadResultData, ...prev]);
+
+    } catch (error) {
+      setDownloadState('idle');
+      setDownloadProgress(0);
+      setStatusMessage('');
+      setErrorMessage(error.message || 'An unexpected error occurred. Please try again.');
     }
-
-    const result = {
-      id: Date.now().toString(),
-      platform: detectedPlatform,
-      url: url,
-      title: `Video from ${platforms[detectedPlatform].name}`,
-      thumbnail: null,
-      videoUrl: url,
-      duration: '0:30',
-      quality: '720p',
-      timestamp: new Date().toLocaleString()
-    };
-
-    setDownloadResult(result);
-    setDownloadState('completed');
-    setHistory(prev => [result, ...prev]);
   };
 
-  const handleSaveFile = () => {
-    if (!downloadResult) return;
-    const a = document.createElement('a');
-    a.href = downloadResult.videoUrl;
-    a.download = `vidown_${downloadResult.platform}_${downloadResult.id}.mp4`;
-    a.target = '_blank';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  const handleSaveFile = async () => {
+    if (!downloadResult || !downloadResult.videoUrl) return;
+
+    try {
+      // Try to fetch the video as a blob for proper download
+      const proxyUrl = CORS_PROXIES[0] + encodeURIComponent(downloadResult.videoUrl);
+      let response;
+
+      try {
+        // First try direct fetch
+        response = await fetch(downloadResult.videoUrl, { mode: 'cors' });
+        if (!response.ok) throw new Error('Direct fetch failed');
+      } catch {
+        // Try with CORS proxy
+        try {
+          response = await fetch(proxyUrl);
+          if (!response.ok) throw new Error('Proxy fetch failed');
+        } catch {
+          // If blob download fails, open in new tab as fallback
+          window.open(downloadResult.videoUrl, '_blank');
+          return;
+        }
+      }
+
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `vidown_${downloadResult.platform}_${downloadResult.id}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      // Ultimate fallback: open direct URL
+      window.open(downloadResult.videoUrl, '_blank');
+    }
+  };
+
+  const handleOpenVideo = () => {
+    if (downloadResult?.videoUrl) {
+      window.open(downloadResult.videoUrl, '_blank');
+    }
+  };
+
+  const resetDownload = () => {
+    setDownloadState('idle');
+    setDownloadProgress(0);
+    setStatusMessage('');
+    setDownloadResult(null);
+    setVideoPreviewUrl(null);
+    setErrorMessage('');
   };
 
   const handleSendMessage = async () => {
@@ -343,22 +763,71 @@ download_video('https://www.tiktok.com/@user/video/123')`;
 
                 {/* Download Result */}
                 {downloadState === 'completed' && downloadResult && (
-                  <div className="mt-4 bg-slate-800 rounded-2xl p-4 border border-green-500/30 animate-scaleIn">
-                    <div className="flex items-center gap-3 mb-3">
-                      <CheckCircle size={20} className="text-green-400" />
-                      <span className="text-sm font-medium text-green-400">Download Ready</span>
+                  <div className="mt-4 bg-slate-800 rounded-2xl p-5 border border-green-500/30 animate-scaleIn">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <CheckCircle size={20} className="text-green-400" />
+                        <span className="text-sm font-medium text-green-400">Video Ready</span>
+                      </div>
+                      <button
+                        onClick={resetDownload}
+                        className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-700 transition-colors"
+                      >
+                        New Download
+                      </button>
                     </div>
+
+                    {/* Video Preview */}
+                    {videoPreviewUrl && (
+                      <div className="mb-4 rounded-xl overflow-hidden bg-black">
+                        <video
+                          src={videoPreviewUrl}
+                          controls
+                          className="w-full max-h-[300px] object-contain"
+                          poster={downloadResult.thumbnail || undefined}
+                          preload="metadata"
+                        >
+                          Your browser does not support video playback.
+                        </video>
+                      </div>
+                    )}
+
+                    {/* Thumbnail fallback if video cannot be previewed */}
+                    {!videoPreviewUrl && downloadResult.thumbnail && (
+                      <div className="mb-4 rounded-xl overflow-hidden">
+                        <img
+                          src={downloadResult.thumbnail}
+                          alt={downloadResult.title}
+                          className="w-full max-h-[200px] object-cover"
+                        />
+                      </div>
+                    )}
+
                     <div className="space-y-2 text-sm text-slate-300">
                       <p><span className="text-slate-500">Title:</span> {downloadResult.title}</p>
+                      <p><span className="text-slate-500">Author:</span> {downloadResult.author}</p>
                       <p><span className="text-slate-500">Quality:</span> {downloadResult.quality}</p>
                       <p><span className="text-slate-500">Duration:</span> {downloadResult.duration}</p>
                     </div>
-                    <button
-                      onClick={handleSaveFile}
-                      className="mt-3 w-full py-2 bg-green-600 hover:bg-green-700 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
-                    >
-                      <Download size={16} /> Save Video
-                    </button>
+
+                    <div className="mt-4 flex gap-2">
+                      <button
+                        onClick={handleSaveFile}
+                        className="flex-1 py-3 bg-green-600 hover:bg-green-700 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                      >
+                        <Download size={16} /> Save Video (MP4)
+                      </button>
+                      <button
+                        onClick={handleOpenVideo}
+                        className="px-4 py-3 bg-slate-700 hover:bg-slate-600 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                      >
+                        <Play size={16} /> Open
+                      </button>
+                    </div>
+
+                    <p className="mt-3 text-xs text-slate-500 text-center">
+                      If Save does not work, click Open to view the video in a new tab, then right-click and select "Save video as..."
+                    </p>
                   </div>
                 )}
               </div>
