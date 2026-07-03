@@ -2,70 +2,20 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Download, Sparkles, BookOpen, Code, History, Link2, CheckCircle,
   RefreshCw, Send, FileVideo, Info, Smartphone, Copy, Check, Menu, X,
-  Play, ExternalLink
+  ExternalLink
 } from 'lucide-react';
 
 const apiKey = '';
 const modelName = 'gemini-2.5-flash-preview-09-2025';
-// External downloader services (fallback when API fails)
+
+// External downloader services - direct redirect (NO API calls)
 const EXTERNAL_DOWNLOADERS = {
   tiktok: 'https://ssstik.io/en',
   instagram: 'https://snapinsta.app',
-  facebook: 'https://getmyfb.com',
-  threads: 'https://threadsdownloader.com',
+  facebook: 'https://snapsave.app/id',
+  threads: 'https://snapinsta.app',
   shopee: 'https://shopeenowatermark.com',
 };
-
-// Cobalt API - universal video downloader that supports CORS
-async function cobaltDownload(videoUrl) {
-  const res = await fetch('https://api.cobalt.tools/api/json', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
-    body: JSON.stringify({ url: videoUrl }),
-  });
-  if (!res.ok) {
-    const errorText = await res.text().catch(() => 'Unknown error');
-    throw new Error('Cobalt API gagal: ' + res.status + ' - ' + errorText);
-  }
-  const data = await res.json();
-  if (data.status === 'error') {
-    throw new Error(data.text || 'Cobalt tidak bisa memproses URL ini');
-  }
-  if (data.status === 'redirect' || data.status === 'stream') {
-    return { videoUrl: data.url };
-  }
-  if (data.status === 'picker' && data.picker && data.picker.length > 0) {
-    const videoItem = data.picker.find(p => p.type === 'video') || data.picker[0];
-    return { videoUrl: videoItem.url, thumbnail: videoItem.thumb || null };
-  }
-  throw new Error('Cobalt mengembalikan response yang tidak dikenali');
-}
-
-// TikTok specific API (tikwm.com) - known to work
-async function tiktokDownload(videoUrl) {
-  const response = await fetch('https://www.tikwm.com/api/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ url: videoUrl, hd: '1' }),
-  });
-  if (!response.ok) throw new Error('TikWM API request gagal');
-  const data = await response.json();
-  if (data.code !== 0 || !data.data) {
-    throw new Error(data.msg || 'Gagal mengekstrak video TikTok');
-  }
-  const videoData = data.data;
-  return {
-    videoUrl: videoData.hdplay || videoData.play,
-    title: videoData.title || 'TikTok Video',
-    thumbnail: videoData.cover || videoData.origin_cover,
-    duration: videoData.duration ? Math.floor(videoData.duration / 60) + ':' + String(videoData.duration % 60).padStart(2, '0') : null,
-    quality: videoData.hdplay ? '1080p HD' : '720p',
-    author: videoData.author ? videoData.author.nickname : 'Unknown',
-  };
-}
 
 const platforms = {
   shopee: {
@@ -110,18 +60,13 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [url, setUrl] = useState('');
   const [detectedPlatform, setDetectedPlatform] = useState(null);
-  const [downloadState, setDownloadState] = useState('idle');
-  const [downloadProgress, setDownloadProgress] = useState(0);
-  const [statusMessage, setStatusMessage] = useState('');
-  const [downloadResult, setDownloadResult] = useState(null);
+  const [successMessage, setSuccessMessage] = useState('');
   const [copiedId, setCopiedId] = useState(null);
   const [history, setHistory] = useState([]);
   const [messages, setMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [videoPreviewUrl, setVideoPreviewUrl] = useState(null);
-  const [showExternalFallback, setShowExternalFallback] = useState(false);
   const chatEndRef = useRef(null);
 
   useEffect(() => {
@@ -132,7 +77,7 @@ export default function App() {
     const lower = url.toLowerCase();
     if (lower.includes('shopee') || lower.includes('shp.ee')) {
       setDetectedPlatform('shopee');
-    } else if (lower.includes('tiktok')) {
+    } else if (lower.includes('tiktok') || lower.includes('vm.tiktok')) {
       setDetectedPlatform('tiktok');
     } else if (lower.includes('instagram') || lower.includes('instagr.am')) {
       setDetectedPlatform('instagram');
@@ -162,9 +107,7 @@ export default function App() {
 
   const triggerDownload = async () => {
     setErrorMessage('');
-    setVideoPreviewUrl(null);
-    setShowExternalFallback(false);
-    setDownloadResult(null);
+    setSuccessMessage('');
 
     if (!url) {
       setErrorMessage('Silakan paste URL video terlebih dahulu!');
@@ -175,138 +118,32 @@ export default function App() {
       return;
     }
 
-    setDownloadState('analyzing');
-    setDownloadProgress(10);
-    setStatusMessage('Menganalisis URL...');
-
+    // Copy URL to clipboard
     try {
-      let result = null;
-
-      // For TikTok: use tikwm.com API (proven to work)
-      if (detectedPlatform === 'tiktok') {
-        setDownloadProgress(30);
-        setStatusMessage('Menghubungi TikTok API...');
-        try {
-          result = await tiktokDownload(url);
-        } catch (tiktokErr) {
-          // TikTok API failed, try Cobalt
-          setDownloadProgress(50);
-          setStatusMessage('API utama gagal, mencoba Cobalt...');
-          try {
-            result = await cobaltDownload(url);
-          } catch (cobaltErr) {
-            throw new Error('Semua API gagal. ' + tiktokErr.message);
-          }
-        }
-      } else {
-        // For other platforms: try Cobalt API first
-        setDownloadProgress(30);
-        setStatusMessage('Menghubungi Cobalt API...');
-        try {
-          result = await cobaltDownload(url);
-        } catch (cobaltErr) {
-          // Cobalt failed - show external fallback
-          throw new Error('Cobalt API gagal: ' + cobaltErr.message);
-        }
-      }
-
-      if (!result || !result.videoUrl) {
-        throw new Error('Tidak bisa mengekstrak URL video. Video mungkin private atau link tidak valid.');
-      }
-
-      // Success - show video player
-      setDownloadProgress(90);
-      setStatusMessage('Video berhasil diekstrak!');
-      setVideoPreviewUrl(result.videoUrl);
-
-      await new Promise(resolve => setTimeout(resolve, 300));
-      setDownloadProgress(100);
-      setStatusMessage('Siap disimpan!');
-
-      const downloadResultData = {
-        id: Date.now().toString(),
-        platform: detectedPlatform,
-        url: url,
-        title: result.title || 'Video dari ' + platforms[detectedPlatform].name,
-        thumbnail: result.thumbnail || null,
-        videoUrl: result.videoUrl,
-        duration: result.duration || null,
-        quality: result.quality || '720p',
-        author: result.author || 'Unknown',
-        timestamp: new Date().toLocaleString()
-      };
-
-      setDownloadResult(downloadResultData);
-      setDownloadState('completed');
-      setHistory(prev => [downloadResultData, ...prev]);
-
-    } catch (error) {
-      // Download failed - show external fallback option
-      setDownloadState('idle');
-      setDownloadProgress(0);
-      setStatusMessage('');
-      setErrorMessage(error.message || 'Terjadi kesalahan. Silakan coba lagi.');
-      setShowExternalFallback(true);
+      await navigator.clipboard.writeText(url);
+    } catch (err) {
+      console.error('Failed to copy:', err);
     }
-  };
 
-  const handleOpenExternalDownloader = () => {
-    if (!detectedPlatform) return;
+    // Open external downloader in new tab
     const externalUrl = EXTERNAL_DOWNLOADERS[detectedPlatform];
     if (externalUrl) {
       window.open(externalUrl, '_blank');
     }
-  };
 
-  const handleSaveFile = async () => {
-    if (!downloadResult || !downloadResult.videoUrl) return;
+    // Show success message
+    setSuccessMessage('URL sudah di-copy! Layanan downloader sudah dibuka di tab baru. Tinggal paste URL di sana.');
 
-    try {
-      // Try to fetch the video as a blob for proper download
-      const response = await fetch(downloadResult.videoUrl, { mode: 'cors' });
-      if (!response.ok) throw new Error('Fetch gagal');
-
-      const blob = await response.blob();
-      const blobUrl = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = 'vidown_' + downloadResult.platform + '_' + downloadResult.id + '.mp4';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(blobUrl);
-    } catch {
-      // Fallback: use download attribute with direct link
-      try {
-        const a = document.createElement('a');
-        a.href = downloadResult.videoUrl;
-        a.download = 'vidown_' + downloadResult.platform + '_' + downloadResult.id + '.mp4';
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      } catch {
-        // Ultimate fallback: open in new tab
-        window.open(downloadResult.videoUrl, '_blank');
-      }
-    }
-  };
-
-  const handleOpenVideo = () => {
-    if (downloadResult && downloadResult.videoUrl) {
-      window.open(downloadResult.videoUrl, '_blank');
-    }
-  };
-
-  const resetDownload = () => {
-    setDownloadState('idle');
-    setDownloadProgress(0);
-    setStatusMessage('');
-    setDownloadResult(null);
-    setVideoPreviewUrl(null);
-    setErrorMessage('');
-    setShowExternalFallback(false);
+    // Save to history
+    const historyItem = {
+      id: Date.now().toString(),
+      platform: detectedPlatform,
+      url: url,
+      title: 'Video dari ' + platforms[detectedPlatform].name,
+      timestamp: new Date().toLocaleString(),
+      service: externalUrl
+    };
+    setHistory(prev => [historyItem, ...prev]);
   };
 
   const handleSendMessage = async () => {
@@ -406,7 +243,7 @@ download_video('https://www.tiktok.com/@user/video/123')`;
         </nav>
         <div className="p-4 border-t border-slate-800">
           <div className="text-xs text-slate-500 space-y-1">
-            <p className="flex items-center gap-1"><Info size={12} /> Engine: Cobalt + TikWM</p>
+            <p className="flex items-center gap-1"><Info size={12} /> Redirect ke downloader eksternal</p>
             <p>AI: Gemini 2.5 Flash</p>
           </div>
         </div>
@@ -417,7 +254,7 @@ download_video('https://www.tiktok.com/@user/video/123')`;
         {/* Header */}
         <div className="p-6 border-b border-slate-800">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm text-slate-400">Active platforms:</span>
+            <span className="text-sm text-slate-400">Platform aktif:</span>
             {Object.entries(platforms).map(([key, platform]) => (
               <span key={key} className={`px-3 py-1 rounded-full text-xs font-medium ${platform.iconBg}`}>
                 {platform.name}
@@ -432,14 +269,14 @@ download_video('https://www.tiktok.com/@user/video/123')`;
             <div className="space-y-6 animate-fadeIn">
               {/* URL Input - Hero Section */}
               <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 rounded-3xl p-8 border border-blue-500/20 shadow-lg shadow-blue-500/5">
-                <h2 className="text-2xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">Download Video Instantly</h2>
+                <h2 className="text-2xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">Download Video Instan</h2>
                 <p className="text-slate-400 text-sm mb-5">Paste URL video dari Shopee, TikTok, Instagram, Facebook, atau Threads</p>
                 <div className="flex flex-col sm:flex-row gap-3">
                   <div className="flex-1 relative">
                     <input
                       type="text"
                       value={url}
-                      onChange={(e) => { setUrl(e.target.value); setErrorMessage(''); setShowExternalFallback(false); }}
+                      onChange={(e) => { setUrl(e.target.value); setErrorMessage(''); setSuccessMessage(''); }}
                       placeholder={detectedPlatform ? platforms[detectedPlatform].placeholder : 'Paste URL video di sini...'}
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl px-5 py-4 text-base text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
                     />
@@ -457,136 +294,39 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                   </button>
                   <button
                     onClick={triggerDownload}
-                    disabled={downloadState === 'downloading' || downloadState === 'analyzing'}
-                    className={`px-8 py-4 rounded-xl font-semibold text-base transition-all flex items-center justify-center gap-2 ${
-                      downloadState === 'downloading' || downloadState === 'analyzing'
-                        ? 'bg-gradient-to-r from-blue-600/50 to-purple-600/50 text-white/70 cursor-wait'
-                        : 'bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-500 hover:to-purple-500 hover:shadow-lg hover:shadow-purple-500/25 active:scale-95'
-                    }`}
+                    className="px-8 py-4 rounded-xl font-semibold text-base transition-all flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-500 hover:to-purple-500 hover:shadow-lg hover:shadow-purple-500/25 active:scale-95"
                   >
-                    {downloadState === 'downloading' || downloadState === 'analyzing' ? (
-                      <><RefreshCw size={18} className="animate-spin" /> Processing</>
-                    ) : (
-                      <><Download size={18} /> Download</>
-                    )}
+                    <Download size={18} /> Download
                   </button>
                 </div>
 
                 {/* Error Message */}
                 {errorMessage && (
                   <div className="mt-3 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3">
-                    <p className="mb-2">{errorMessage}</p>
-                    {showExternalFallback && detectedPlatform && (
-                      <div className="mt-3 pt-3 border-t border-red-500/20">
-                        <p className="text-slate-300 text-sm mb-2">
-                          Gunakan downloader eksternal yang sudah terbukti bekerja:
-                        </p>
-                        <button
-                          onClick={handleOpenExternalDownloader}
-                          className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg text-sm font-medium hover:from-blue-500 hover:to-purple-500 transition-all"
-                        >
-                          <ExternalLink size={16} />
-                          Buka di {EXTERNAL_DOWNLOADERS[detectedPlatform] ? new URL(EXTERNAL_DOWNLOADERS[detectedPlatform]).hostname : 'Downloader Eksternal'}
-                        </button>
-                        <p className="text-xs text-slate-500 mt-2">
-                          Tip: Paste URL video kamu di situs tersebut untuk mendownload.
-                        </p>
-                      </div>
-                    )}
+                    <p>{errorMessage}</p>
                   </div>
                 )}
 
-                {/* Progress Bar */}
-                {(downloadState === 'analyzing' || downloadState === 'downloading') && (
-                  <div className="mt-4 animate-fadeIn">
-                    <div className="flex justify-between text-xs text-slate-400 mb-2">
-                      <span>{statusMessage}</span>
-                      <span>{downloadProgress}%</span>
+                {/* Success Message */}
+                {successMessage && (
+                  <div className="mt-4 bg-green-500/10 border border-green-500/30 rounded-2xl p-5 animate-scaleIn">
+                    <div className="flex items-center gap-3 mb-2">
+                      <CheckCircle size={24} className="text-green-400" />
+                      <span className="text-lg font-semibold text-green-400">Berhasil!</span>
                     </div>
-                    <div className="w-full bg-slate-800 rounded-full h-2">
-                      <div
-                        className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-500"
-                        style={{ width: downloadProgress + '%' }}
-                      />
+                    <p className="text-sm text-green-300">{successMessage}</p>
+                    <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
+                      <ExternalLink size={14} />
+                      <span>Layanan: {EXTERNAL_DOWNLOADERS[detectedPlatform]}</span>
                     </div>
-                  </div>
-                )}
-
-                {/* Download Result with Video Player */}
-                {downloadState === 'completed' && downloadResult && (
-                  <div className="mt-4 bg-slate-800 rounded-2xl p-5 border border-green-500/30 animate-scaleIn">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <CheckCircle size={20} className="text-green-400" />
-                        <span className="text-sm font-medium text-green-400">Video Siap!</span>
-                      </div>
-                      <button
-                        onClick={resetDownload}
-                        className="text-xs text-slate-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-700 transition-colors"
-                      >
-                        Download Baru
-                      </button>
-                    </div>
-
-                    {/* Video Preview Player */}
-                    {videoPreviewUrl && (
-                      <div className="mb-4 rounded-xl overflow-hidden bg-black">
-                        <video
-                          src={videoPreviewUrl}
-                          controls
-                          className="w-full max-h-[300px] object-contain"
-                          poster={downloadResult.thumbnail || undefined}
-                          preload="metadata"
-                        >
-                          Browser tidak mendukung pemutaran video.
-                        </video>
-                      </div>
-                    )}
-
-                    {/* Thumbnail fallback */}
-                    {!videoPreviewUrl && downloadResult.thumbnail && (
-                      <div className="mb-4 rounded-xl overflow-hidden">
-                        <img
-                          src={downloadResult.thumbnail}
-                          alt={downloadResult.title}
-                          className="w-full max-h-[200px] object-cover"
-                        />
-                      </div>
-                    )}
-
-                    <div className="space-y-2 text-sm text-slate-300">
-                      <p><span className="text-slate-500">Judul:</span> {downloadResult.title}</p>
-                      {downloadResult.author && <p><span className="text-slate-500">Author:</span> {downloadResult.author}</p>}
-                      {downloadResult.quality && <p><span className="text-slate-500">Kualitas:</span> {downloadResult.quality}</p>}
-                      {downloadResult.duration && <p><span className="text-slate-500">Durasi:</span> {downloadResult.duration}</p>}
-                    </div>
-
-                    <div className="mt-4 flex gap-2">
-                      <button
-                        onClick={handleSaveFile}
-                        className="flex-1 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2"
-                      >
-                        <Download size={16} /> Simpan Video (MP4)
-                      </button>
-                      <button
-                        onClick={handleOpenVideo}
-                        className="px-4 py-3 bg-slate-700 hover:bg-slate-600 rounded-xl text-sm font-medium transition-colors flex items-center justify-center gap-2"
-                      >
-                        <Play size={16} /> Buka
-                      </button>
-                    </div>
-
-                    <p className="mt-3 text-xs text-slate-500 text-center">
-                      Jika Simpan tidak bekerja, klik Buka lalu klik kanan video dan pilih "Save video as..."
-                    </p>
                   </div>
                 )}
               </div>
 
-              {/* Promo Banner */}
+              {/* Info Banner */}
               <div className="bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/30 rounded-2xl p-6">
-                <h2 className="text-xl font-bold mb-2">Download Video dari 5 Platform</h2>
-                <p className="text-slate-300 text-sm">Paste URL video dari Shopee, TikTok, Instagram, Facebook, atau Threads. TikTok menggunakan API langsung, platform lain menggunakan Cobalt API dengan fallback ke downloader eksternal.</p>
+                <h2 className="text-xl font-bold mb-2">Cara Kerja</h2>
+                <p className="text-slate-300 text-sm">Klik Download dan URL otomatis di-copy ke clipboard. Layanan downloader eksternal dibuka di tab baru. Tinggal paste URL di sana dan klik download.</p>
               </div>
 
               {/* Platform Cards */}
@@ -602,6 +342,7 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                       <FileVideo size={18} />
                     </div>
                     <p className="text-sm font-medium text-slate-200">{platform.name}</p>
+                    <p className="text-xs text-slate-500 mt-1 truncate">{new URL(EXTERNAL_DOWNLOADERS[key]).hostname}</p>
                   </div>
                 ))}
               </div>
@@ -717,23 +458,23 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                 {[
                   {
                     platform: 'shopee',
-                    steps: ['Buka aplikasi Shopee', 'Temukan video yang ingin diunduh', 'Tap tombol Share', 'Pilih "Salin Link"', 'Paste URL ke vIDown']
+                    steps: ['Buka aplikasi Shopee', 'Temukan video yang ingin diunduh', 'Tap tombol Share', 'Pilih "Salin Link"', 'Paste URL ke vIDown dan klik Download']
                   },
                   {
                     platform: 'tiktok',
-                    steps: ['Buka aplikasi TikTok', 'Temukan video yang ingin diunduh', 'Tap tombol Share (panah)', 'Pilih "Copy Link"', 'Paste URL ke vIDown']
+                    steps: ['Buka aplikasi TikTok', 'Temukan video yang ingin diunduh', 'Tap tombol Share (panah)', 'Pilih "Copy Link"', 'Paste URL ke vIDown dan klik Download']
                   },
                   {
                     platform: 'instagram',
-                    steps: ['Buka aplikasi Instagram', 'Temukan Reel yang ingin diunduh', 'Tap icon tiga titik (...)', 'Pilih "Copy Link"', 'Paste URL ke vIDown']
+                    steps: ['Buka aplikasi Instagram', 'Temukan Reel yang ingin diunduh', 'Tap icon tiga titik (...)', 'Pilih "Copy Link"', 'Paste URL ke vIDown dan klik Download']
                   },
                   {
                     platform: 'facebook',
-                    steps: ['Buka aplikasi Facebook', 'Temukan video yang ingin diunduh', 'Tap tombol Share', 'Pilih "Copy Link"', 'Paste URL ke vIDown']
+                    steps: ['Buka aplikasi Facebook', 'Temukan video yang ingin diunduh', 'Tap tombol Share', 'Pilih "Copy Link"', 'Paste URL ke vIDown dan klik Download']
                   },
                   {
                     platform: 'threads',
-                    steps: ['Buka app Threads', 'Temukan post video', 'Tap icon share/tiga titik', 'Pilih "Copy link"', 'Paste ke vIDown']
+                    steps: ['Buka app Threads', 'Temukan post video', 'Tap icon share/tiga titik', 'Pilih "Copy link"', 'Paste ke vIDown dan klik Download']
                   }
                 ].map(guide => (
                   <div key={guide.platform} className="bg-slate-900 rounded-2xl p-6 border border-slate-800">
