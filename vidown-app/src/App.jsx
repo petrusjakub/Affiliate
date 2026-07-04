@@ -5,7 +5,7 @@ import {
   Save
 } from 'lucide-react';
 
-const API_BASE_URL = '';
+const API_BASE_URL = 'https://vidown-api.vercel.app';
 
 const apiKey = '';
 const modelName = 'gemini-2.5-flash-preview-09-2025';
