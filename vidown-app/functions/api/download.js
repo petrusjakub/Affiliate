@@ -22,17 +22,21 @@ export async function onRequest(context) {
 
     const platform = detectPlatform(url);
     let result;
-    try {
-      switch (platform) {
-        case 'tiktok': result = await extractTikTok(url); break;
-        case 'instagram':
-        case 'threads':
-        case 'facebook': result = await extractWithCobalt(url); break;
-        case 'shopee': result = await extractShopee(url); break;
-        default: result = await extractWithCobalt(url); break;
+    let lastError;
+    const extractors = getExtractors(platform, url);
+    
+    for (const extractor of extractors) {
+      try {
+        result = await extractor();
+        if (result && result.videoUrl) break;
+      } catch (e) {
+        lastError = e;
+        continue;
       }
-    } catch (e) {
-      try { result = await extractWithCobalt(url); } catch (e2) { throw e; }
+    }
+
+    if (!result || !result.videoUrl) {
+      throw lastError || new Error('Semua metode ekstraksi gagal');
     }
 
     return new Response(JSON.stringify({
@@ -60,51 +64,88 @@ function detectPlatform(url) {
   return null;
 }
 
-async function extractTikTok(url) {
+function getExtractors(platform, url) {
+  switch (platform) {
+    case 'tiktok':
+      return [() => extractTikWM(url), () => extractByFetchingPage(url)];
+    case 'instagram':
+    case 'threads':
+      return [() => extractInstagramV1(url), () => extractByFetchingPage(url)];
+    case 'facebook':
+      return [() => extractByFetchingPage(url)];
+    case 'shopee':
+      return [() => extractByFetchingPage(url)];
+    default:
+      return [() => extractTikWM(url), () => extractByFetchingPage(url)];
+  }
+}
+
+async function extractTikWM(url) {
   const response = await fetch('https://www.tikwm.com/api/', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: { 
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    },
     body: `url=${encodeURIComponent(url)}&hd=1`
   });
+  if (!response.ok) throw new Error('TikWM API gagal: ' + response.status);
   const data = await response.json();
-  if (data && data.data) {
+  if (data && data.code === 0 && data.data) {
     return {
-      videoUrl: data.data.hdplay || data.data.play || null,
+      videoUrl: data.data.hdplay || data.data.play,
       title: data.data.title || 'TikTok Video',
-      thumbnail: data.data.cover || data.data.origin_cover || null
+      thumbnail: data.data.cover || data.data.origin_cover
     };
   }
-  throw new Error('Gagal mengekstrak video TikTok');
+  throw new Error('TikWM: tidak ada data video');
 }
 
-async function extractWithCobalt(url) {
-  const response = await fetch('https://co.wuk.sh/api/json', {
+async function extractInstagramV1(url) {
+  const response = await fetch('https://v1.saveig.app/api/ajaxSearch', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify({ url, vCodec: 'h264', vQuality: '720' })
+    headers: { 
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Origin': 'https://saveig.app'
+    },
+    body: `q=${encodeURIComponent(url)}&t=media&lang=en`
   });
-  if (!response.ok) throw new Error('Cobalt API gagal: ' + response.status);
+  if (!response.ok) throw new Error('SaveIG gagal: ' + response.status);
   const data = await response.json();
-  if (data.status === 'redirect' || data.status === 'stream') {
-    return { videoUrl: data.url, title: 'Video', thumbnail: null };
+  if (data && data.data) {
+    const mp4Match = data.data.match(/href="(https?:\/\/[^"]*\.mp4[^"]*)"/i);
+    const anyMatch = data.data.match(/href="(https?:\/\/[^"]+)"[^>]*download/i) || data.data.match(/href="(https?:\/\/[^"]+)"/i);
+    const videoUrl = (mp4Match && mp4Match[1]) || (anyMatch && anyMatch[1]);
+    if (videoUrl) {
+      return { videoUrl: videoUrl.replace(/&amp;/g, '&'), title: 'Instagram Video', thumbnail: null };
+    }
   }
-  if (data.status === 'picker' && data.picker && data.picker.length > 0) {
-    const video = data.picker.find(p => p.type === 'video') || data.picker[0];
-    return { videoUrl: video.url, title: 'Video', thumbnail: video.thumb || null };
-  }
-  if (data.status === 'error') throw new Error(data.text || 'Cobalt error');
-  throw new Error('Response tidak dikenali');
+  throw new Error('SaveIG: tidak ditemukan link video');
 }
 
-async function extractShopee(url) {
+async function extractByFetchingPage(url) {
   const response = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    headers: { 
+      'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+      'Accept': 'text/html,application/xhtml+xml'
+    },
     redirect: 'follow'
   });
+  if (!response.ok) throw new Error('Gagal mengakses halaman: ' + response.status);
   const html = await response.text();
-  const ogMatch = html.match(/<meta[^>]*property=["']og:video(?::url)?["'][^>]*content=["']([^"']+)["']/i);
-  if (ogMatch) return { videoUrl: ogMatch[1], title: 'Shopee Video', thumbnail: null };
-  const jsonMatch = html.match(/"(?:videoUrl|playUrl)"\s*:\s*"([^"]+)"/);
-  if (jsonMatch) return { videoUrl: jsonMatch[1].replace(/\\u002F/g, '/'), title: 'Shopee Video', thumbnail: null };
-  throw new Error('Gagal mengekstrak video Shopee');
+  
+  const ogVideo = html.match(/<meta[^>]*property=["']og:video(?::url)?["'][^>]*content=["']([^"']+)["']/i);
+  if (ogVideo && ogVideo[1]) return { videoUrl: ogVideo[1].replace(/&amp;/g, '&'), title: 'Video', thumbnail: null };
+
+  const videoSrc = html.match(/<video[^>]*src=["']([^"']+)["']/i);
+  if (videoSrc && videoSrc[1]) return { videoUrl: videoSrc[1].replace(/&amp;/g, '&'), title: 'Video', thumbnail: null };
+
+  const jsonVideo = html.match(/"(?:videoUrl|playUrl|video_url|contentUrl)"\s*:\s*"(https?:\/\/[^"]+)"/i);
+  if (jsonVideo && jsonVideo[1]) return { videoUrl: jsonVideo[1].replace(/\\u002F/g, '/').replace(/\\\//g, '/'), title: 'Video', thumbnail: null };
+
+  const sourceSrc = html.match(/<source[^>]*src=["']([^"']+)["'][^>]*type=["']video/i);
+  if (sourceSrc && sourceSrc[1]) return { videoUrl: sourceSrc[1].replace(/&amp;/g, '&'), title: 'Video', thumbnail: null };
+
+  throw new Error('Tidak ditemukan video di halaman ini');
 }
