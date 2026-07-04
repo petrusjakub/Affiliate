@@ -1,4 +1,8 @@
-import fetch from 'node-fetch';
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
 
 function detectPlatform(url) {
   const lower = url.toLowerCase();
@@ -14,72 +18,54 @@ async function extractTikTok(url) {
   const response = await fetch('https://www.tikwm.com/api/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `url=${encodeURIComponent(url)}&hd=1`
+    body: `url=${encodeURIComponent(url)}&hd=1`,
   });
   const data = await response.json();
   if (data && data.data) {
     return {
       videoUrl: data.data.hdplay || data.data.play || null,
       title: data.data.title || 'TikTok Video',
-      thumbnail: data.data.cover || data.data.origin_cover || null
+      thumbnail: data.data.cover || data.data.origin_cover || null,
     };
   }
   throw new Error('Gagal mengekstrak video TikTok');
 }
 
 async function extractInstagram(url) {
-  const response = await fetch('https://v3.saveig.app/api/ajaxSearch', {
+  const response = await fetch('https://co.wuk.sh/api/json', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
     },
-    body: `q=${encodeURIComponent(url)}&t=media&lang=en`
+    body: JSON.stringify({ url }),
   });
   const data = await response.json();
-  if (data && data.data) {
-    const html = data.data;
-    const mp4Match = html.match(/href="([^"]*\.mp4[^"]*)"/);
-    if (mp4Match && mp4Match[1]) {
-      return {
-        videoUrl: mp4Match[1],
-        title: 'Instagram Video',
-        thumbnail: null
-      };
-    }
-    // Try finding any download link
-    const downloadMatch = html.match(/href="(https?:\/\/[^"]+)"/);
-    if (downloadMatch && downloadMatch[1]) {
-      return {
-        videoUrl: downloadMatch[1],
-        title: 'Instagram Video',
-        thumbnail: null
-      };
-    }
+  if (data && data.url) {
+    return {
+      videoUrl: data.url,
+      title: 'Instagram Video',
+      thumbnail: null,
+    };
   }
   throw new Error('Gagal mengekstrak video Instagram');
 }
 
 async function extractFacebook(url) {
-  const response = await fetch('https://getmyfb.com/process', {
+  const response = await fetch('https://co.wuk.sh/api/json', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
     },
-    body: `id=${encodeURIComponent(url)}&locale=en`
+    body: JSON.stringify({ url }),
   });
-  const html = await response.text();
-  // Try to find HD or SD video link
-  const hdMatch = html.match(/href="(https?:\/\/[^"]*)"[^>]*>.*?HD/i);
-  const sdMatch = html.match(/href="(https?:\/\/[^"]*)"[^>]*>.*?SD/i);
-  const anyMatch = html.match(/href="(https?:\/\/[^"]*\.mp4[^"]*)"/);
-  const videoUrl = (hdMatch && hdMatch[1]) || (sdMatch && sdMatch[1]) || (anyMatch && anyMatch[1]);
-  if (videoUrl) {
+  const data = await response.json();
+  if (data && data.url) {
     return {
-      videoUrl,
+      videoUrl: data.url,
       title: 'Facebook Video',
-      thumbnail: null
+      thumbnail: null,
     };
   }
   throw new Error('Gagal mengekstrak video Facebook');
@@ -88,17 +74,20 @@ async function extractFacebook(url) {
 async function extractShopee(url) {
   const response = await fetch(url, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     },
-    redirect: 'follow'
+    redirect: 'follow',
   });
   const html = await response.text();
-  const ogVideoMatch = html.match(/<meta[^>]*property=["']og:video(?::url)?["'][^>]*content=["']([^"']+)["']/i);
+  const ogVideoMatch = html.match(
+    /<meta[^>]*property=["']og:video(?::url)?["'][^>]*content=["']([^"']+)["']/i
+  );
   if (ogVideoMatch && ogVideoMatch[1]) {
     return {
       videoUrl: ogVideoMatch[1],
       title: 'Shopee Video',
-      thumbnail: null
+      thumbnail: null,
     };
   }
   // Try alternate pattern
@@ -107,57 +96,68 @@ async function extractShopee(url) {
     return {
       videoUrl: videoSrcMatch[1].replace(/\\u002F/g, '/'),
       title: 'Shopee Video',
-      thumbnail: null
+      thumbnail: null,
     };
   }
   throw new Error('Gagal mengekstrak video Shopee');
 }
 
 async function extractThreads(url) {
-  // Use same service as Instagram
-  return await extractInstagram(url);
-}
-
-async function extractUniversal(url) {
-  const response = await fetch('https://api.cobalt.tools/api/json', {
+  const response = await fetch('https://co.wuk.sh/api/json', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Accept': 'application/json'
+      'Accept': 'application/json',
     },
-    body: JSON.stringify({ url })
+    body: JSON.stringify({ url }),
+  });
+  const data = await response.json();
+  if (data && data.url) {
+    return {
+      videoUrl: data.url,
+      title: 'Threads Video',
+      thumbnail: null,
+    };
+  }
+  throw new Error('Gagal mengekstrak video Threads');
+}
+
+async function extractUniversal(url) {
+  const response = await fetch('https://co.wuk.sh/api/json', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify({ url }),
   });
   const data = await response.json();
   if (data && data.url) {
     return {
       videoUrl: data.url,
       title: 'Video',
-      thumbnail: null
+      thumbnail: null,
     };
   }
   throw new Error('Gagal mengekstrak video. Coba URL lain.');
 }
 
-export default async function handler(req, res) {
-  // Set CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+export async function onRequestOptions() {
+  return new Response(null, {
+    status: 204,
+    headers: CORS_HEADERS,
+  });
+}
 
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ success: false, error: 'Method not allowed' });
-  }
-
+export async function onRequestPost(context) {
   try {
-    const { url } = req.body || {};
+    const { url } = await context.request.json();
 
     if (!url) {
-      return res.status(400).json({ success: false, error: 'URL diperlukan' });
+      return new Response(
+        JSON.stringify({ success: false, error: 'URL diperlukan' }),
+        { status: 400, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } }
+      );
     }
 
     const platform = detectPlatform(url);
@@ -181,7 +181,6 @@ export default async function handler(req, res) {
           result = await extractThreads(url);
           break;
         default:
-          // Universal fallback
           result = await extractUniversal(url);
           break;
       }
@@ -198,17 +197,23 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({
-      success: true,
-      videoUrl: result.videoUrl,
-      title: result.title || 'Video',
-      platform: platform || 'unknown',
-      thumbnail: result.thumbnail || null
-    });
+    return new Response(
+      JSON.stringify({
+        success: true,
+        videoUrl: result.videoUrl,
+        title: result.title || 'Video',
+        platform: platform || 'unknown',
+        thumbnail: result.thumbnail || null,
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } }
+    );
   } catch (error) {
-    return res.status(500).json({
-      success: false,
-      error: error.message || 'Terjadi kesalahan server'
-    });
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: error.message || 'Terjadi kesalahan server',
+      }),
+      { status: 500, headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } }
+    );
   }
 }
