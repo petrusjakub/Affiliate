@@ -1,18 +1,18 @@
-export async function onRequestOptions() {
-  return new Response(null, {
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    }
-  });
-}
-
-export async function onRequestPost(context) {
+export async function onRequest(context) {
   const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
     'Content-Type': 'application/json',
   };
+
+  if (context.request.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  if (context.request.method !== 'POST') {
+    return new Response(JSON.stringify({ success: false, error: 'Method not allowed' }), { status: 405, headers: corsHeaders });
+  }
 
   try {
     const { url } = await context.request.json();
@@ -22,12 +22,11 @@ export async function onRequestPost(context) {
 
     const platform = detectPlatform(url);
     let result;
-
     try {
       switch (platform) {
         case 'tiktok': result = await extractTikTok(url); break;
         case 'instagram':
-        case 'threads': result = await extractWithCobalt(url); break;
+        case 'threads':
         case 'facebook': result = await extractWithCobalt(url); break;
         case 'shopee': result = await extractShopee(url); break;
         default: result = await extractWithCobalt(url); break;
@@ -82,7 +81,7 @@ async function extractWithCobalt(url) {
   const response = await fetch('https://co.wuk.sh/api/json', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-    body: JSON.stringify({ url: url, vCodec: 'h264', vQuality: '720' })
+    body: JSON.stringify({ url, vCodec: 'h264', vQuality: '720' })
   });
   if (!response.ok) throw new Error('Cobalt API gagal: ' + response.status);
   const data = await response.json();
@@ -94,18 +93,18 @@ async function extractWithCobalt(url) {
     return { videoUrl: video.url, title: 'Video', thumbnail: video.thumb || null };
   }
   if (data.status === 'error') throw new Error(data.text || 'Cobalt error');
-  throw new Error('Cobalt response tidak dikenali');
+  throw new Error('Response tidak dikenali');
 }
 
 async function extractShopee(url) {
   const response = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
     redirect: 'follow'
   });
   const html = await response.text();
   const ogMatch = html.match(/<meta[^>]*property=["']og:video(?::url)?["'][^>]*content=["']([^"']+)["']/i);
-  if (ogMatch && ogMatch[1]) return { videoUrl: ogMatch[1], title: 'Shopee Video', thumbnail: null };
+  if (ogMatch) return { videoUrl: ogMatch[1], title: 'Shopee Video', thumbnail: null };
   const jsonMatch = html.match(/"(?:videoUrl|playUrl)"\s*:\s*"([^"]+)"/);
-  if (jsonMatch && jsonMatch[1]) return { videoUrl: jsonMatch[1].replace(/\\u002F/g, '/').replace(/\\\//g, '/'), title: 'Shopee Video', thumbnail: null };
+  if (jsonMatch) return { videoUrl: jsonMatch[1].replace(/\\u002F/g, '/'), title: 'Shopee Video', thumbnail: null };
   throw new Error('Gagal mengekstrak video Shopee');
 }
