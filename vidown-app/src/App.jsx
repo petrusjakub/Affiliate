@@ -2,20 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Download, Sparkles, BookOpen, Code, History, Link2, CheckCircle,
   RefreshCw, Send, FileVideo, Info, Smartphone, Copy, Check, Menu, X,
-  ExternalLink
+  Save
 } from 'lucide-react';
+
+const API_BASE_URL = 'https://vidown-api.vercel.app';
 
 const apiKey = '';
 const modelName = 'gemini-2.5-flash-preview-09-2025';
-
-// External downloader services - direct redirect (NO API calls)
-const EXTERNAL_DOWNLOADERS = {
-  tiktok: 'https://ssstik.io/en',
-  instagram: 'https://snapinsta.app',
-  facebook: 'https://snapsave.app/id',
-  threads: 'https://snapinsta.app',
-  shopee: 'https://shopeenowatermark.com',
-};
 
 const platforms = {
   shopee: {
@@ -67,6 +60,9 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [videoResult, setVideoResult] = useState(null);
   const chatEndRef = useRef(null);
 
   useEffect(() => {
@@ -108,6 +104,7 @@ export default function App() {
   const triggerDownload = async () => {
     setErrorMessage('');
     setSuccessMessage('');
+    setVideoResult(null);
 
     if (!url) {
       setErrorMessage('Silakan paste URL video terlebih dahulu!');
@@ -118,32 +115,77 @@ export default function App() {
       return;
     }
 
-    // Copy URL to clipboard
+    setIsDownloading(true);
+    setDownloadProgress(0);
+
+    // Simulate progress
+    const progressInterval = setInterval(() => {
+      setDownloadProgress(prev => {
+        if (prev >= 90) {
+          clearInterval(progressInterval);
+          return 90;
+        }
+        return prev + Math.random() * 15;
+      });
+    }, 300);
+
     try {
-      await navigator.clipboard.writeText(url);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+      const response = await fetch(`${API_BASE_URL}/api/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+
+      const data = await response.json();
+      clearInterval(progressInterval);
+      setDownloadProgress(100);
+
+      if (data.success && data.videoUrl) {
+        setVideoResult(data);
+        setSuccessMessage('Video berhasil diekstrak! Klik "Simpan Video" untuk mendownload.');
+
+        // Save to history
+        const historyItem = {
+          id: Date.now().toString(),
+          platform: detectedPlatform,
+          url: url,
+          title: data.title || 'Video dari ' + platforms[detectedPlatform].name,
+          timestamp: new Date().toLocaleString(),
+          videoUrl: data.videoUrl
+        };
+        setHistory(prev => [historyItem, ...prev]);
+      } else {
+        setErrorMessage(data.error || 'Gagal mengekstrak video. Coba lagi.');
+      }
+    } catch (error) {
+      clearInterval(progressInterval);
+      setErrorMessage('Gagal terhubung ke server. Pastikan backend API sudah di-deploy.');
+    } finally {
+      setIsDownloading(false);
+      setTimeout(() => setDownloadProgress(0), 1000);
     }
+  };
 
-    // Open external downloader in new tab
-    const externalUrl = EXTERNAL_DOWNLOADERS[detectedPlatform];
-    if (externalUrl) {
-      window.open(externalUrl, '_blank');
+  const handleSaveVideo = async () => {
+    if (!videoResult || !videoResult.videoUrl) return;
+    try {
+      setSuccessMessage('Mengunduh file video...');
+      const response = await fetch(videoResult.videoUrl);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = (videoResult.title || 'video') + '.mp4';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+      setSuccessMessage('Video berhasil didownload!');
+    } catch (error) {
+      // Fallback: open in new tab
+      window.open(videoResult.videoUrl, '_blank');
+      setSuccessMessage('Video dibuka di tab baru. Klik kanan dan pilih "Save video as..."');
     }
-
-    // Show success message
-    setSuccessMessage('URL sudah di-copy! Layanan downloader sudah dibuka di tab baru. Tinggal paste URL di sana.');
-
-    // Save to history
-    const historyItem = {
-      id: Date.now().toString(),
-      platform: detectedPlatform,
-      url: url,
-      title: 'Video dari ' + platforms[detectedPlatform].name,
-      timestamp: new Date().toLocaleString(),
-      service: externalUrl
-    };
-    setHistory(prev => [historyItem, ...prev]);
   };
 
   const handleSendMessage = async () => {
@@ -243,7 +285,7 @@ download_video('https://www.tiktok.com/@user/video/123')`;
         </nav>
         <div className="p-4 border-t border-slate-800">
           <div className="text-xs text-slate-500 space-y-1">
-            <p className="flex items-center gap-1"><Info size={12} /> Redirect ke downloader eksternal</p>
+            <p className="flex items-center gap-1"><Info size={12} /> Self-hosted backend API</p>
             <p>AI: Gemini 2.5 Flash</p>
           </div>
         </div>
@@ -294,9 +336,10 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                   </button>
                   <button
                     onClick={triggerDownload}
+                    disabled={isDownloading}
                     className="px-8 py-4 rounded-xl font-semibold text-base transition-all flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white hover:from-blue-500 hover:to-purple-500 hover:shadow-lg hover:shadow-purple-500/25 active:scale-95"
                   >
-                    <Download size={18} /> Download
+                    {isDownloading ? <><RefreshCw size={18} className="animate-spin" /> Memproses...</> : <><Download size={18} /> Download</>}
                   </button>
                 </div>
 
@@ -307,18 +350,54 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                   </div>
                 )}
 
+                {/* Progress Bar */}
+                {isDownloading && (
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
+                      <span>Mengekstrak video...</span>
+                      <span>{Math.round(downloadProgress)}%</span>
+                    </div>
+                    <div className="w-full bg-slate-800 rounded-full h-2.5">
+                      <div className="bg-gradient-to-r from-blue-500 to-purple-500 h-2.5 rounded-full transition-all duration-300" style={{ width: `${downloadProgress}%` }}></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Video Result */}
+                {videoResult && (
+                  <div className="mt-4 bg-slate-800/50 border border-green-500/30 rounded-2xl p-5 animate-scaleIn">
+                    <div className="flex items-center gap-3 mb-3">
+                      <CheckCircle size={24} className="text-green-400" />
+                      <span className="text-lg font-semibold text-green-400">Video Ditemukan!</span>
+                    </div>
+                    {videoResult.title && (
+                      <p className="text-sm text-slate-300 mb-3">{videoResult.title}</p>
+                    )}
+                    <div className="rounded-xl overflow-hidden bg-black mb-4">
+                      <video
+                        src={videoResult.videoUrl}
+                        controls
+                        className="w-full max-h-[400px]"
+                        poster={videoResult.thumbnail || undefined}
+                      />
+                    </div>
+                    <button
+                      onClick={handleSaveVideo}
+                      className="w-full px-6 py-3 rounded-xl font-semibold text-base bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-400 hover:to-emerald-500 hover:shadow-lg hover:shadow-green-500/25 active:scale-95 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Save size={18} /> Simpan Video
+                    </button>
+                  </div>
+                )}
+
                 {/* Success Message */}
-                {successMessage && (
+                {successMessage && !videoResult && (
                   <div className="mt-4 bg-green-500/10 border border-green-500/30 rounded-2xl p-5 animate-scaleIn">
                     <div className="flex items-center gap-3 mb-2">
                       <CheckCircle size={24} className="text-green-400" />
-                      <span className="text-lg font-semibold text-green-400">Berhasil!</span>
+                      <span className="text-lg font-semibold text-green-400">Info</span>
                     </div>
                     <p className="text-sm text-green-300">{successMessage}</p>
-                    <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
-                      <ExternalLink size={14} />
-                      <span>Layanan: {EXTERNAL_DOWNLOADERS[detectedPlatform]}</span>
-                    </div>
                   </div>
                 )}
               </div>
@@ -326,7 +405,7 @@ download_video('https://www.tiktok.com/@user/video/123')`;
               {/* Info Banner */}
               <div className="bg-gradient-to-r from-blue-600/20 to-purple-600/20 border border-blue-500/30 rounded-2xl p-6">
                 <h2 className="text-xl font-bold mb-2">Cara Kerja</h2>
-                <p className="text-slate-300 text-sm">Klik Download dan URL otomatis di-copy ke clipboard. Layanan downloader eksternal dibuka di tab baru. Tinggal paste URL di sana dan klik download.</p>
+                <p className="text-slate-300 text-sm">Paste URL video, klik Download. Backend API akan mengekstrak link video secara mandiri. Setelah berhasil, klik "Simpan Video" untuk mendownload file langsung ke perangkat Anda. Tidak ada redirect ke layanan lain.</p>
               </div>
 
               {/* Platform Cards */}
@@ -342,7 +421,7 @@ download_video('https://www.tiktok.com/@user/video/123')`;
                       <FileVideo size={18} />
                     </div>
                     <p className="text-sm font-medium text-slate-200">{platform.name}</p>
-                    <p className="text-xs text-slate-500 mt-1 truncate">{new URL(EXTERNAL_DOWNLOADERS[key]).hostname}</p>
+                    <p className="text-xs text-slate-500 mt-1">Self-hosted</p>
                   </div>
                 ))}
               </div>
@@ -502,6 +581,35 @@ download_video('https://www.tiktok.com/@user/video/123')`;
           {activeTab === 'developer' && (
             <div className="space-y-4 animate-fadeIn">
               <h2 className="text-xl font-bold mb-4">Developer Reference</h2>
+
+              {/* Deploy Backend Section */}
+              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-6">
+                <h3 className="text-lg font-semibold mb-3 text-blue-400">Deploy Backend API</h3>
+                <ol className="space-y-3 text-sm text-slate-300">
+                  <li className="flex items-start gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 bg-blue-600/20 border border-blue-500/30 rounded-full flex items-center justify-center text-xs font-medium text-blue-400">1</span>
+                    <span>Buka <a href="https://vercel.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">https://vercel.com</a></span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 bg-blue-600/20 border border-blue-500/30 rounded-full flex items-center justify-center text-xs font-medium text-blue-400">2</span>
+                    <span>Import folder <code className="px-1.5 py-0.5 bg-slate-800 rounded text-blue-300">vidown-api</code> dari repo ini</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 bg-blue-600/20 border border-blue-500/30 rounded-full flex items-center justify-center text-xs font-medium text-blue-400">3</span>
+                    <span>Deploy (gratis)</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 bg-blue-600/20 border border-blue-500/30 rounded-full flex items-center justify-center text-xs font-medium text-blue-400">4</span>
+                    <span>Copy URL deployment (misal: <code className="px-1.5 py-0.5 bg-slate-800 rounded text-green-300">https://vidown-api-xxx.vercel.app</code>)</span>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="flex-shrink-0 w-6 h-6 bg-blue-600/20 border border-blue-500/30 rounded-full flex items-center justify-center text-xs font-medium text-blue-400">5</span>
+                    <span>Update <code className="px-1.5 py-0.5 bg-slate-800 rounded text-yellow-300">API_BASE_URL</code> di frontend App.jsx</span>
+                  </li>
+                </ol>
+              </div>
+
+              {/* Python Code Example */}
               <div className="bg-slate-900 rounded-2xl border border-slate-800 overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-800/50">
                   <span className="text-xs font-medium text-slate-400">Python - yt-dlp Example</span>

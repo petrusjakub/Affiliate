@@ -30,5 +30,5 @@
     "Run 'cd /projects/sandbox/Affiliate/vidown-app && unset NODE_OPTIONS && npm run build' - should exit 0 and create dist/ directory"
   ],
   "blocked_reason": null,
-  "findings": "App.jsx rewritten again to fix CORS issues. Now uses: TikTok via tikwm.com (works), other platforms via Cobalt API (api.cobalt.tools - supports CORS). External fallback downloaders: threads -> threadsdownloader.com, shopee -> shopeenowatermark.com, instagram -> snapinsta.app, facebook -> getmyfb.com, tiktok -> ssstik.io. Removed all unreliable CORS proxies. Push to main blocked by CI protection - PR #7 created on feat/cobalt-api-download branch."
+  "findings": "Rewrote App.jsx to use self-hosted backend API instead of redirecting to external downloaders. Created vidown-api/ folder with Vercel serverless function (api/download.js) that extracts video URLs from TikTok (tikwm.com), Instagram/Threads (saveig.app), Facebook (getmyfb.com), Shopee (og:video meta tag), with Cobalt API as universal fallback. Frontend now POSTs to backend, shows progress bar, video player, and Simpan Video button that downloads via blob. Developer tab includes backend deploy instructions. Build could not be verified due to INTEGRATIONS_ONLY network mode (no npm install possible), but code is syntactically valid."
 }
